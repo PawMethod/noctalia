@@ -27,6 +27,7 @@ public:
   struct SecretRequest {
     SecretKind kind = SecretKind::WifiPsk;
     std::string connectionName;
+    std::string connectionPath;
   };
 
   using RequestCallback = std::function<void(const SecretRequest&)>;

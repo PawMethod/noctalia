@@ -675,6 +675,8 @@ void NetworkTab::onClose() {
   m_lastStructureKey.clear();
   m_lastListWidth = -1.0F;
   m_pendingAccessPoint.reset();
+  m_pendingSecretConnectionPath.clear();
+  m_pendingSimPin.clear();
   m_active = false;
   m_actionPending = false;
   m_actionPendingTimer.stop();
@@ -724,6 +726,8 @@ void NetworkTab::showPasswordPrompt(const NetworkSecretAgent::SecretRequest& req
   m_secretSubmitting = false;
   m_pendingSecretKind = request.kind;
   m_pendingSecretName = request.connectionName;
+  m_pendingSecretConnectionPath = request.connectionPath;
+  m_pendingSimPin.clear();
   m_pendingAccessPoint.reset();
   m_passwordRevealed = false;
   if (m_passwordInput != nullptr) {
@@ -772,6 +776,9 @@ void NetworkTab::submitPasswordPrompt(const std::string& value) {
   } else if (m_secrets != nullptr) {
     if (m_pendingSecretKind == NetworkSecretAgent::SecretKind::SimPin) {
       m_secretSubmitting = true;
+      m_pendingSimPin = security::SecureBuffer(
+          std::span(reinterpret_cast<const std::uint8_t*>(value.data()), value.size())
+      );
       if (m_passwordInput != nullptr) {
         m_passwordInput->setEnabled(false);
       }
@@ -799,6 +806,8 @@ void NetworkTab::clearPasswordPrompt() {
   m_secretSubmitting = false;
   m_pendingSecretKind = NetworkSecretAgent::SecretKind::WifiPsk;
   m_pendingSecretName.clear();
+  m_pendingSecretConnectionPath.clear();
+  m_pendingSimPin.clear();
   m_pendingAccessPoint.reset();
   m_passwordRevealed = false;
   if (m_passwordInput != nullptr) {
@@ -827,9 +836,13 @@ void NetworkTab::syncCurrentCard() {
   const NetworkState& s = m_network->state();
   if (m_secretSubmitting && m_pendingSecretKind == NetworkSecretAgent::SecretKind::SimPin) {
     const auto& cellularConnections = m_network->cellularConnections();
-    if (std::ranges::any_of(cellularConnections, [](const CellularConnectionInfo& connection) {
-          return connection.connected;
-        })) {
+    const auto connected = std::ranges::find_if(cellularConnections, [this](const CellularConnectionInfo& connection) {
+      return connection.path == m_pendingSecretConnectionPath && connection.connected;
+    });
+    if (connected != cellularConnections.end()) {
+      const auto pinBytes = m_pendingSimPin.bytes();
+      const std::string pin(reinterpret_cast<const char*>(pinBytes.data()), pinBytes.size());
+      m_network->saveCellularPin(connected->path, pin);
       clearPasswordPrompt();
     }
   }

@@ -59,6 +59,7 @@ public:
   bool activateCellularConnection(const CellularConnectionInfo& cellular) override;
   bool deactivateCellularConnection(const CellularConnectionInfo& cellular) override;
   bool addCellularConnection(const std::string& name, const std::string& apn) override;
+  bool saveCellularPin(const std::string& connectionPath, const std::string& pin) override;
   bool forgetCellularConnection(const CellularConnectionInfo& cellular) override;
   [[nodiscard]] bool canActivateWiredConnection() const noexcept override;
   bool activateWiredConnection() override;

@@ -35,6 +35,7 @@ public:
   virtual bool activateCellularConnection(const CellularConnectionInfo& cellular) = 0;
   virtual bool deactivateCellularConnection(const CellularConnectionInfo& cellular) = 0;
   virtual bool addCellularConnection(const std::string& /*name*/, const std::string& /*apn*/) { return false; }
+  virtual bool saveCellularPin(const std::string& /*connectionPath*/, const std::string& /*pin*/) { return false; }
   virtual bool forgetCellularConnection(const CellularConnectionInfo& /*cellular*/) { return false; }
   [[nodiscard]] virtual bool canActivateWiredConnection() const noexcept { return false; }
   virtual bool activateWiredConnection() { return false; }

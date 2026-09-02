@@ -3,6 +3,7 @@
 #include "core/timer_manager.h"
 #include "dbus/network/network_secret_agent.h"
 #include "dbus/network/network_types.h"
+#include "security/secure_buffer.h"
 #include "shell/control_center/tab.h"
 
 #include <chrono>
@@ -100,6 +101,8 @@ private:
   bool m_secretSubmitting = false;
   NetworkSecretAgent::SecretKind m_pendingSecretKind = NetworkSecretAgent::SecretKind::WifiPsk;
   std::string m_pendingSecretName;
+  std::string m_pendingSecretConnectionPath;
+  security::SecureBuffer m_pendingSimPin;
   std::optional<AccessPointInfo> m_pendingAccessPoint;
   bool m_active = false;
 

@@ -846,6 +846,71 @@ bool NetworkManagerService::addCellularConnection(const std::string& name, const
   }
 }
 
+bool NetworkManagerService::saveCellularPin(const std::string& connectionPath, const std::string& pin) {
+  const bool validPin = pin.size() >= 4 && pin.size() <= 8
+      && std::ranges::all_of(pin, [](char digit) { return digit >= '0' && digit <= '9'; });
+  if (connectionPath.empty() || connectionPath == "/" || !validPin) {
+    return false;
+  }
+  const std::weak_ptr<int> lifetimeToken = m_lifetimeToken;
+  try {
+    auto connection = std::shared_ptr<sdbus::IProxy>(
+        sdbus::createProxy(m_bus.connection(), kNmBusName, sdbus::ObjectPath{connectionPath})
+    );
+    connection->callMethodAsync("GetSettings")
+        .onInterface(kNmSettingsConnectionInterface)
+        .uponReplyInvoke([this, lifetimeToken, connection, connectionPath,
+                          pin](std::optional<sdbus::Error> err, ConnectionSettings settings) {
+          if (lifetimeToken.expired()) {
+            return;
+          }
+          if (err.has_value()) {
+            kLog.warn("load cellular profile for PIN storage failed path={}: {}", connectionPath, err->what());
+            return;
+          }
+          auto connectionSettings = settings.find("connection");
+          if (connectionSettings == settings.end()) {
+            return;
+          }
+          auto type = connectionSettings->second.find("type");
+          try {
+            if (type == connectionSettings->second.end()
+                || type->second.get<std::string>() != kNmCellularConnectionType) {
+              return;
+            }
+          } catch (const sdbus::Error&) {
+            return;
+          }
+          settings["gsm"]["pin"] = sdbus::Variant{pin};
+          settings["gsm"]["pin-flags"] = sdbus::Variant{std::uint32_t{0}};
+          const VariantMap args;
+          try {
+            connection->callMethodAsync("Update2")
+                .onInterface(kNmSettingsConnectionInterface)
+                .withArguments(settings, k_nmSettingsUpdate2FlagToDisk, args)
+                .uponReplyInvoke([this, lifetimeToken, connection,
+                                  connectionPath](std::optional<sdbus::Error> updateErr, VariantMap /*result*/) {
+                  if (lifetimeToken.expired()) {
+                    return;
+                  }
+                  if (updateErr.has_value()) {
+                    kLog.warn("store cellular PIN failed path={}: {}", connectionPath, updateErr->what());
+                  } else {
+                    kLog.info("stored cellular PIN in profile path={}", connectionPath);
+                  }
+                  refresh();
+                });
+          } catch (const sdbus::Error& updateError) {
+            kLog.warn("store cellular PIN dispatch failed path={}: {}", connectionPath, updateError.what());
+          }
+        });
+    return true;
+  } catch (const sdbus::Error& e) {
+    kLog.warn("load cellular profile for PIN storage dispatch failed path={}: {}", connectionPath, e.what());
+    return false;
+  }
+}
+
 bool NetworkManagerService::forgetCellularConnection(const CellularConnectionInfo& cellular) {
   if (cellular.path.empty() || cellular.active) {
     return false;
