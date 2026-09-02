@@ -77,6 +77,7 @@ public:
   // Whether any saved connection matches the SSID (uses cached snapshot refreshed on every refresh()).
   [[nodiscard]] bool hasSavedConnection(const std::string& ssid) const override;
   [[nodiscard]] bool supportsSecretAgent() const noexcept override { return true; }
+  void onSecretAgentReady() override;
   [[nodiscard]] bool supportsCellular() const noexcept override { return m_state.cellularAvailable; }
 
 private:

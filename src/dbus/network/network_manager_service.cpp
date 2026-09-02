@@ -794,6 +794,120 @@ bool NetworkManagerService::deactivateCellularConnection(const CellularConnectio
   });
 }
 
+void NetworkManagerService::onSecretAgentReady() {
+  const std::weak_ptr<int> lifetimeToken = m_lifetimeToken;
+  try {
+    m_nm->callMethodAsync("Get")
+        .onInterface(kPropertiesInterface)
+        .withArguments(kNmInterface, "ActiveConnections")
+        .uponReplyInvoke([this, lifetimeToken](std::optional<sdbus::Error> err, sdbus::Variant value) {
+          if (lifetimeToken.expired() || err.has_value()) {
+            return;
+          }
+          std::vector<sdbus::ObjectPath> activePaths;
+          try {
+            activePaths = value.get<std::vector<sdbus::ObjectPath>>();
+          } catch (const sdbus::Error&) {
+            return;
+          }
+          for (const auto& activePath : activePaths) {
+            try {
+              auto active = std::shared_ptr<sdbus::IProxy>(
+                  sdbus::createProxy(m_bus.connection(), kNmBusName, activePath)
+              );
+              const std::string activePathString{activePath};
+              active->callMethodAsync("GetAll")
+                  .onInterface(kPropertiesInterface)
+                  .withArguments(kNmActiveConnectionInterface)
+                  .uponReplyInvoke([this, lifetimeToken, active, activePathString](
+                                       std::optional<sdbus::Error> activeErr,
+                                       std::map<std::string, sdbus::Variant> properties
+                                   ) {
+                    if (lifetimeToken.expired() || activeErr.has_value()) {
+                      return;
+                    }
+                    std::string type;
+                    std::string connectionPath;
+                    std::uint32_t state = 0U;
+                    try {
+                      type = properties.at("Type").get<std::string>();
+                      connectionPath = properties.at("Connection").get<sdbus::ObjectPath>();
+                      state = properties.at("State").get<std::uint32_t>();
+                    } catch (const std::out_of_range&) {
+                      return;
+                    } catch (const sdbus::Error&) {
+                      return;
+                    }
+                    if (type != kNmCellularConnectionType || state != kNmActiveConnectionStateActivating
+                        || connectionPath.empty() || connectionPath == "/") {
+                      return;
+                    }
+                    try {
+                      active->callMethodAsync("Get")
+                          .onInterface(kPropertiesInterface)
+                          .withArguments(kNmActiveConnectionInterface, "State")
+                          .uponReplyInvoke([this, lifetimeToken, active, activePathString,
+                                    connectionPath](
+                                       std::optional<sdbus::Error> stateErr, sdbus::Variant stateValue
+                                     ) {
+                            if (lifetimeToken.expired() || stateErr.has_value()) {
+                              return;
+                            }
+                            try {
+                              if (stateValue.get<std::uint32_t>() != kNmActiveConnectionStateActivating) {
+                                return;
+                              }
+                              m_nm->callMethodAsync("DeactivateConnection")
+                                  .onInterface(kNmInterface)
+                                  .withArguments(sdbus::ObjectPath{activePathString})
+                                  .uponReplyInvoke([this, lifetimeToken,
+                                                    connectionPath](std::optional<sdbus::Error> stopErr) {
+                                    if (lifetimeToken.expired() || stopErr.has_value()) {
+                                      return;
+                                    }
+                                    try {
+                                      m_nm->callMethodAsync("ActivateConnection")
+                                          .onInterface(kNmInterface)
+                                          .withArguments(
+                                              sdbus::ObjectPath{connectionPath}, sdbus::ObjectPath{"/"},
+                                              sdbus::ObjectPath{"/"}
+                                          )
+                                          .uponReplyInvoke([this, lifetimeToken](
+                                                               std::optional<sdbus::Error> startErr,
+                                                               sdbus::ObjectPath /*newActivePath*/
+                                                           ) {
+                                            if (!lifetimeToken.expired()) {
+                                              if (startErr.has_value()) {
+                                                kLog.warn(
+                                                    "restart cellular authentication failed: {}", startErr->what()
+                                                );
+                                              }
+                                              refresh();
+                                            }
+                                          });
+                                    } catch (const sdbus::Error& startError) {
+                                      kLog.warn(
+                                          "restart cellular authentication dispatch failed: {}", startError.what()
+                                      );
+                                    }
+                                  });
+                            } catch (const sdbus::Error&) {
+                              return;
+                            }
+                          });
+                    } catch (const sdbus::Error& stopError) {
+                      kLog.warn("stop pending cellular authentication failed: {}", stopError.what());
+                    }
+                  });
+            } catch (const sdbus::Error&) {
+            }
+          }
+        });
+  } catch (const sdbus::Error& e) {
+    kLog.debug("pending cellular authentication lookup failed: {}", e.what());
+  }
+}
+
 bool NetworkManagerService::addCellularConnection(const std::string& name, const std::string& apn) {
   if (name.empty() || apn.empty()) {
     return false;

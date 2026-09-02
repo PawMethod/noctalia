@@ -1250,7 +1250,7 @@ void NetworkTab::rebuildApList(Renderer& renderer) {
       if (m_network->state().cellularEnabled) {
         for (const auto& connection : cellular) {
           auto row = std::make_unique<ConnectionProfileRow>(
-              scale, connection.name, connection.active, "antenna-bars-5",
+            scale, connection.name, connection.connected, "antenna-bars-5",
               [this, connection]() {
                 if (m_network != nullptr) {
                   m_network->activateCellularConnection(connection);
