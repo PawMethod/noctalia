@@ -152,6 +152,7 @@ namespace {
 
   struct ActiveCellularState {
     std::set<std::string> activeProfilePaths;
+    std::set<std::string> connectedProfilePaths;
     int pending = 0;
   };
 
@@ -791,6 +792,42 @@ bool NetworkManagerService::deactivateCellularConnection(const CellularConnectio
       .name = cellular.name,
       .active = cellular.active,
   });
+}
+
+bool NetworkManagerService::forgetCellularConnection(const CellularConnectionInfo& cellular) {
+  if (cellular.path.empty() || cellular.active) {
+    return false;
+  }
+  const std::string connectionPath = cellular.path;
+  const std::string connectionName = cellular.name;
+  const std::weak_ptr<int> lifetimeToken = m_lifetimeToken;
+  try {
+    auto connection = std::shared_ptr<sdbus::IProxy>(
+        sdbus::createProxy(m_bus.connection(), kNmBusName, sdbus::ObjectPath{connectionPath})
+    );
+    connection->callMethodAsync("Delete")
+        .onInterface(kNmSettingsConnectionInterface)
+        .uponReplyInvoke([this, lifetimeToken, connection, connectionPath,
+                          connectionName](std::optional<sdbus::Error> err) {
+          if (lifetimeToken.expired()) {
+            return;
+          }
+          if (err.has_value()) {
+            kLog.warn(
+                "delete cellular profile failed name={} path={}: {}", connectionName, connectionPath, err->what()
+            );
+          } else {
+            kLog.info("deleted cellular profile name={} path={}", connectionName, connectionPath);
+          }
+          refresh();
+        });
+    return true;
+  } catch (const sdbus::Error& e) {
+    kLog.warn(
+        "delete cellular profile dispatch failed name={} path={}: {}", connectionName, connectionPath, e.what()
+    );
+    return false;
+  }
 }
 
 bool NetworkManagerService::canActivateWiredConnection() const noexcept { return !m_savedWiredConnectionPaths.empty(); }
@@ -1567,6 +1604,7 @@ void NetworkManagerService::refreshCellularConnections(std::function<void()> onC
                     if (--activeState->pending == 0) {
                       for (auto& connection : cellularState->connections) {
                         connection.active = activeState->activeProfilePaths.contains(connection.path);
+                        connection.connected = activeState->connectedProfilePaths.contains(connection.path);
                       }
                       finalize();
                     }
@@ -1606,6 +1644,9 @@ void NetworkManagerService::refreshCellularConnections(std::function<void()> onC
                                   && (state == kNmActiveConnectionStateActivating
                                       || state == kNmActiveConnectionStateActivated)) {
                                 activeState->activeProfilePaths.insert(profilePath);
+                                if (state == kNmActiveConnectionStateActivated) {
+                                  activeState->connectedProfilePaths.insert(profilePath);
+                                }
                               }
                             }
                             onActiveComplete();

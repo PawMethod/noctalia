@@ -34,6 +34,7 @@ public:
   virtual bool deactivateVpnConnection(const VpnConnectionInfo& vpn) = 0;
   virtual bool activateCellularConnection(const CellularConnectionInfo& cellular) = 0;
   virtual bool deactivateCellularConnection(const CellularConnectionInfo& cellular) = 0;
+  virtual bool forgetCellularConnection(const CellularConnectionInfo& /*cellular*/) { return false; }
   [[nodiscard]] virtual bool canActivateWiredConnection() const noexcept { return false; }
   virtual bool activateWiredConnection() { return false; }
   virtual void setWirelessEnabled(bool enabled, WirelessEnabledCompletion onComplete = {}) = 0;

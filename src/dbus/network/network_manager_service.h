@@ -58,6 +58,7 @@ public:
   bool deactivateVpnConnection(const VpnConnectionInfo& vpn) override;
   bool activateCellularConnection(const CellularConnectionInfo& cellular) override;
   bool deactivateCellularConnection(const CellularConnectionInfo& cellular) override;
+  bool forgetCellularConnection(const CellularConnectionInfo& cellular) override;
   [[nodiscard]] bool canActivateWiredConnection() const noexcept override;
   bool activateWiredConnection() override;
 

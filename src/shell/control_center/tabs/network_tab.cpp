@@ -296,9 +296,10 @@ namespace {
   public:
     ConnectionProfileRow(
         float scale, std::string name, bool active, std::string glyph, std::function<void()> onActivate,
-        std::function<void()> onDeactivate
+        std::function<void()> onDeactivate, std::function<void()> onForget = {}
     )
-        : m_active(active), m_onActivate(std::move(onActivate)), m_onDeactivate(std::move(onDeactivate)) {
+        : m_active(active), m_savedProfile(static_cast<bool>(onForget)), m_onActivate(std::move(onActivate)),
+          m_onDeactivate(std::move(onDeactivate)), m_onForget(std::move(onForget)) {
       setDirection(FlexDirection::Horizontal);
       setAlign(FlexAlign::Center);
       setGap(Style::spaceSm * scale);
@@ -327,27 +328,38 @@ namespace {
           })
       );
 
-      addChild(
-          ui::button({
-              .out = &m_checkButton,
-              .glyph = "check",
-              .glyphSize = Style::baseGlyphSize * scale,
-              .variant = ButtonVariant::Ghost,
-              .padding = Style::spaceXs * scale,
-              .radius = Style::scaledRadiusSm(scale),
-              .opacity = m_active ? 1.0F : 0.0F,
-          })
-      );
+      if (!m_savedProfile) {
+        addChild(
+            ui::button({
+                .out = &m_checkButton,
+                .glyph = "check",
+                .glyphSize = Style::baseGlyphSize * scale,
+                .variant = ButtonVariant::Ghost,
+                .padding = Style::spaceXs * scale,
+                .radius = Style::scaledRadiusSm(scale),
+                .opacity = m_active ? 1.0F : 0.0F,
+            })
+        );
+      }
 
       addChild(
           ui::button({
               .out = &m_actionButton,
-              .glyph = m_active ? "plug-off" : "plug",
+              .glyph = m_savedProfile ? (m_active ? "check" : "trash") : (m_active ? "plug-off" : "plug"),
               .glyphSize = Style::baseGlyphSize * scale,
-              .variant = m_active ? ButtonVariant::Destructive : ButtonVariant::Default,
+              .variant = m_savedProfile ? ButtonVariant::Ghost
+                                        : (m_active ? ButtonVariant::Destructive : ButtonVariant::Default),
               .padding = Style::spaceXs * scale,
               .radius = Style::scaledRadiusSm(scale),
-              .onClick = [this]() { triggerAction(); },
+              .onClick = [this]() {
+                if (m_savedProfile && !m_active) {
+                  if (m_onForget) {
+                    m_onForget();
+                  }
+                  return;
+                }
+                triggerAction();
+              },
           })
       );
 
@@ -387,6 +399,12 @@ namespace {
 
   private:
     void triggerAction() {
+      if (m_savedProfile) {
+        if (!m_active && m_onActivate) {
+          m_onActivate();
+        }
+        return;
+      }
       if (m_active) {
         if (m_onDeactivate) {
           m_onDeactivate();
@@ -421,8 +439,10 @@ namespace {
     }
 
     bool m_active = false;
+    bool m_savedProfile = false;
     std::function<void()> m_onActivate;
     std::function<void()> m_onDeactivate;
+    std::function<void()> m_onForget;
     Label* m_title = nullptr;
     Button* m_checkButton = nullptr;
     Button* m_actionButton = nullptr;
@@ -699,6 +719,7 @@ void NetworkTab::syncPasswordCard() {
 
 void NetworkTab::showPasswordPrompt(const NetworkSecretAgent::SecretRequest& request) {
   m_hasPendingSecret = true;
+  m_secretSubmitting = false;
   m_pendingSecretKind = request.kind;
   m_pendingSecretName = request.connectionName;
   m_pendingAccessPoint.reset();
@@ -706,6 +727,7 @@ void NetworkTab::showPasswordPrompt(const NetworkSecretAgent::SecretRequest& req
   if (m_passwordInput != nullptr) {
     m_passwordInput->setValue("");
     m_passwordInput->setPasswordMode(true);
+    m_passwordInput->setEnabled(true);
   }
   if (m_passwordRevealButton != nullptr) {
     m_passwordRevealButton->setGlyph("eye");
@@ -714,6 +736,7 @@ void NetworkTab::showPasswordPrompt(const NetworkSecretAgent::SecretRequest& req
 
 void NetworkTab::showPasswordPrompt(const AccessPointInfo& ap) {
   m_hasPendingSecret = true;
+  m_secretSubmitting = false;
   m_pendingSecretKind = NetworkSecretAgent::SecretKind::WifiPsk;
   m_pendingSecretName = ap.ssid;
   m_pendingAccessPoint = ap;
@@ -728,6 +751,9 @@ void NetworkTab::showPasswordPrompt(const AccessPointInfo& ap) {
 }
 
 void NetworkTab::submitPasswordPrompt(const std::string& value) {
+  if (m_secretSubmitting) {
+    return;
+  }
   if (m_pendingSecretKind == NetworkSecretAgent::SecretKind::SimPin && !isValidSimPin(value)) {
     if (m_passwordInput != nullptr) {
       m_passwordInput->setInvalid(true);
@@ -742,10 +768,17 @@ void NetworkTab::submitPasswordPrompt(const std::string& value) {
       m_network->activateAccessPoint(*m_pendingAccessPoint, value);
     }
   } else if (m_secrets != nullptr) {
-    clearPasswordPrompt();
+    if (m_pendingSecretKind == NetworkSecretAgent::SecretKind::SimPin) {
+      m_secretSubmitting = true;
+      if (m_passwordInput != nullptr) {
+        m_passwordInput->setEnabled(false);
+      }
+      m_secrets->submitSecret(value);
+      PanelManager::instance().requestUpdateOnly();
+      PanelManager::instance().requestRedraw();
+      return;
+    }
     m_secrets->submitSecret(value);
-    PanelManager::instance().refresh();
-    return;
   }
   clearPasswordPrompt();
   PanelManager::instance().refresh();
@@ -761,6 +794,7 @@ void NetworkTab::cancelPasswordPrompt() {
 
 void NetworkTab::clearPasswordPrompt() {
   m_hasPendingSecret = false;
+  m_secretSubmitting = false;
   m_pendingSecretKind = NetworkSecretAgent::SecretKind::WifiPsk;
   m_pendingSecretName.clear();
   m_pendingAccessPoint.reset();
@@ -768,6 +802,7 @@ void NetworkTab::clearPasswordPrompt() {
   if (m_passwordInput != nullptr) {
     m_passwordInput->setValue("");
     m_passwordInput->setPasswordMode(true);
+    m_passwordInput->setEnabled(true);
     m_passwordInput->setInvalid(false);
   }
   if (m_passwordRevealButton != nullptr) {
@@ -788,6 +823,14 @@ void NetworkTab::syncCurrentCard() {
     return;
   }
   const NetworkState& s = m_network->state();
+  if (m_secretSubmitting && m_pendingSecretKind == NetworkSecretAgent::SecretKind::SimPin) {
+    const auto& cellularConnections = m_network->cellularConnections();
+    if (std::ranges::any_of(cellularConnections, [](const CellularConnectionInfo& connection) {
+          return connection.connected;
+        })) {
+      clearPasswordPrompt();
+    }
+  }
   if (m_actionPending) {
     const bool flipped = s.connected != m_actionPendingConnected;
     const bool timedOut = std::chrono::steady_clock::now() - m_actionPendingSince > kActionPendingTimeout;
@@ -1125,9 +1168,10 @@ void NetworkTab::rebuildApList(Renderer& renderer) {
                 m_network->activateCellularConnection(connection);
               }
             },
+            std::function<void()>{},
             [this, connection]() {
               if (m_network != nullptr) {
-                m_network->deactivateCellularConnection(connection);
+                m_network->forgetCellularConnection(connection);
               }
             }
         );

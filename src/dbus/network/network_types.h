@@ -27,6 +27,7 @@ struct CellularConnectionInfo {
   std::string path; // NetworkManager settings connection object path.
   std::string name;
   bool active = false;
+  bool connected = false;
 
   bool operator==(const CellularConnectionInfo&) const = default;
 };
