@@ -47,8 +47,7 @@ namespace {
 
   std::string currentDetail(const NetworkState& s, const std::string& externalIp) {
     if (!s.connected) {
-      return s.wirelessEnabled ? i18n::tr("control-center.network.wifi-on")
-                               : i18n::tr("control-center.network.wifi-off");
+      return {};
     }
     std::string out;
     const auto append = [&out](std::string_view part) {
@@ -518,13 +517,11 @@ std::unique_ptr<Flex> NetworkTab::create() {
             if (m_network == nullptr || m_actionPending) {
               return;
             }
-            const bool wasConnected = m_network->state().connected;
-            if (wasConnected) {
-              m_network->disconnect();
-            } else if (!m_network->activateWiredConnection()) {
+            if (!m_network->state().connected) {
               return;
             }
-            beginPendingAction(wasConnected);
+            m_network->disconnect();
+            beginPendingAction(true);
             PanelManager::instance().refresh();
           },
       })
@@ -869,10 +866,9 @@ void NetworkTab::syncCurrentCard() {
   m_currentTitle->setText(currentTitle(s));
   m_currentDetail->setText(currentDetail(s, externalIp));
   if (m_disconnectButton != nullptr) {
-    const bool canReconnectWired = !s.connected && m_network->canActivateWiredConnection();
-    m_disconnectButton->setVisible(s.connected || canReconnectWired || m_actionPending);
-    m_disconnectButton->setGlyph(s.connected ? "plug-off" : "plug");
-    m_disconnectButton->setVariant(s.connected ? ButtonVariant::Destructive : ButtonVariant::Default);
+    m_disconnectButton->setVisible(s.connected || m_actionPending);
+    m_disconnectButton->setGlyph("plug-off");
+    m_disconnectButton->setVariant(ButtonVariant::Destructive);
     m_disconnectButton->setEnabled(!m_actionPending);
   }
   if (m_wifiToggle != nullptr) {
@@ -1016,6 +1012,8 @@ NetworkTab::structureKey(
   key += wirelessEnabled ? '1' : '0';
   key += "\nscan:";
   key += scanning ? '1' : '0';
+  key += "\ncellular-enabled:";
+  key += (m_network != nullptr && m_network->state().cellularEnabled) ? '1' : '0';
   key += "\ncellular-setup:";
   key += m_cellularSetupVisible ? '1' : '0';
   return key;
@@ -1153,6 +1151,8 @@ void NetworkTab::rebuildApList(Renderer& renderer) {
     );
   } else {
     const float opacity = panelCardOpacity();
+    std::unique_ptr<Flex> cellularCardForList;
+    std::unique_ptr<Flex> vpnCardForList;
 
     if (m_network->supportsCellular()) {
       auto cellularCard = ui::column({
@@ -1234,25 +1234,27 @@ void NetworkTab::rebuildApList(Renderer& renderer) {
         cellularCard->addChild(std::move(setup));
       }
 
-      for (const auto& connection : cellular) {
-        auto row = std::make_unique<ConnectionProfileRow>(
-            scale, connection.name, connection.active, "antenna-bars-5",
-            [this, connection]() {
-              if (m_network != nullptr) {
-                m_network->activateCellularConnection(connection);
+      if (m_network->state().cellularEnabled) {
+        for (const auto& connection : cellular) {
+          auto row = std::make_unique<ConnectionProfileRow>(
+              scale, connection.name, connection.active, "antenna-bars-5",
+              [this, connection]() {
+                if (m_network != nullptr) {
+                  m_network->activateCellularConnection(connection);
+                }
+              },
+              std::function<void()>{},
+              [this, connection]() {
+                if (m_network != nullptr) {
+                  m_network->forgetCellularConnection(connection);
+                }
               }
-            },
-            std::function<void()>{},
-            [this, connection]() {
-              if (m_network != nullptr) {
-                m_network->forgetCellularConnection(connection);
-              }
-            }
-        );
-        cellularCard->addChild(std::move(row));
+          );
+          cellularCard->addChild(std::move(row));
+        }
       }
 
-      m_list->addChild(std::move(cellularCard));
+      cellularCardForList = std::move(cellularCard);
     }
 
     if (!vpns.empty()) {
@@ -1302,7 +1304,7 @@ void NetworkTab::rebuildApList(Renderer& renderer) {
         }
       }
 
-      m_list->addChild(std::move(vpnCard));
+      vpnCardForList = std::move(vpnCard);
     }
 
     {
@@ -1350,6 +1352,13 @@ void NetworkTab::rebuildApList(Renderer& renderer) {
       wifiCard->addChild(buildApRows());
 
       m_list->addChild(std::move(wifiCard));
+
+      if (cellularCardForList != nullptr) {
+        m_list->addChild(std::move(cellularCardForList));
+      }
+      if (vpnCardForList != nullptr) {
+        m_list->addChild(std::move(vpnCardForList));
+      }
 
       // Live state (spinner visibility/animation, toggle checked) is owned by
       // syncCurrentCard(), which runs every frame after the card is attached.
