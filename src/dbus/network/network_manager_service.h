@@ -109,6 +109,7 @@ private:
   void readCellularState(
       const std::string& modemPath, std::function<void(std::uint8_t, std::string)> done
   );
+  void refreshCellularState();
   void ensureWifiDeviceSubscribed(const std::string& devicePath);
   void
   collectWifiDevices(std::function<void(std::vector<std::string> devicePaths, std::int64_t lastScanBaseline)> done);
@@ -152,10 +153,14 @@ private:
   bool m_anyVpnConnected = false;
   std::int64_t m_scanBaselineLastScan = 0;
   Timer m_scanTimeoutTimer;
+  Timer m_cellularSignalTimer;
   std::uint64_t m_scanGeneration = 0;
+  std::uint64_t m_cellularSignalGeneration = 0;
   std::optional<bool> m_pendingLocalWirelessEnabled;
+  bool m_cellularStateReadInFlight = false;
   bool m_hasStateSnapshot = false;
   ChangeCallback m_changeCallback;
 
   static constexpr std::chrono::seconds kScanTimeout = std::chrono::seconds(30);
+  static constexpr std::chrono::seconds kCellularSignalRefreshInterval = std::chrono::seconds(5);
 };

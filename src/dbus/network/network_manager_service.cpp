@@ -2353,6 +2353,9 @@ void NetworkManagerService::bindModem(const std::string& modemPath) {
   if (normalized == m_modemPath && (normalized.empty() || m_modem != nullptr)) {
     return;
   }
+  ++m_cellularSignalGeneration;
+  m_cellularSignalTimer.stop();
+  m_cellularStateReadInFlight = false;
   m_modemPath = normalized;
   m_modem.reset();
   if (normalized.empty()) {
@@ -2361,23 +2364,76 @@ void NetworkManagerService::bindModem(const std::string& modemPath) {
 
   try {
     m_modem = sdbus::createProxy(m_bus.connection(), kMmBusName, sdbus::ObjectPath{normalized});
+    const std::weak_ptr<int> lifetimeToken = m_lifetimeToken;
     m_modem->uponSignal("PropertiesChanged")
         .onInterface(kPropertiesInterface)
-        .call([this](
+        .call([this, lifetimeToken](
                   const std::string& interfaceName, const std::map<std::string, sdbus::Variant>& changedProperties,
                   const std::vector<std::string>& /*invalidatedProperties*/
               ) {
-            const bool qualityChanged = interfaceName == kMmModemInterface
+          if (lifetimeToken.expired()) {
+            return;
+          }
+          const bool qualityChanged = interfaceName == kMmModemInterface
               && (changedProperties.contains("SignalQuality") || changedProperties.contains("AccessTechnologies"));
           const bool lteSignalChanged = interfaceName == kMmSignalInterface && changedProperties.contains("Lte");
           if (qualityChanged || lteSignalChanged) {
-            refresh();
+            refreshCellularState();
           }
         });
+
+    auto setupProxy = std::shared_ptr<sdbus::IProxy>(
+        sdbus::createProxy(m_bus.connection(), kMmBusName, sdbus::ObjectPath{normalized})
+    );
+    setupProxy->callMethodAsync("Setup")
+        .onInterface(kMmSignalInterface)
+        .withArguments(static_cast<std::uint32_t>(kCellularSignalRefreshInterval.count()))
+        .uponReplyInvoke([lifetimeToken, setupProxy, normalized](std::optional<sdbus::Error> err) {
+          if (lifetimeToken.expired()) {
+            return;
+          }
+          if (err.has_value()) {
+            kLog.debug("modem signal setup failed {}: {}", normalized, err->what());
+          }
+        });
+
+    m_cellularSignalTimer.startRepeating(kCellularSignalRefreshInterval, [this, lifetimeToken]() {
+      if (!lifetimeToken.expired()) {
+        refreshCellularState();
+      }
+    });
   } catch (const sdbus::Error& e) {
     kLog.debug("modem proxy failed {}: {}", normalized, e.what());
     m_modem.reset();
   }
+}
+
+void NetworkManagerService::refreshCellularState() {
+  if (m_cellularStateReadInFlight || m_modemPath.empty()) {
+    return;
+  }
+  m_cellularStateReadInFlight = true;
+  const std::string modemPath = m_modemPath;
+  const std::uint64_t generation = m_cellularSignalGeneration;
+  const std::weak_ptr<int> lifetimeToken = m_lifetimeToken;
+  readCellularState(modemPath, [this, lifetimeToken, modemPath, generation](
+                                   std::uint8_t percent, std::string accessTechnology
+                               ) {
+    if (lifetimeToken.expired() || generation != m_cellularSignalGeneration || modemPath != m_modemPath) {
+      return;
+    }
+    m_cellularStateReadInFlight = false;
+    if (m_state.kind != NetworkConnectivity::Cellular
+        || (m_state.cellularSignalStrength == percent
+            && m_state.cellularAccessTechnology == accessTechnology)) {
+      return;
+    }
+    m_state.cellularSignalStrength = percent;
+    m_state.cellularAccessTechnology = std::move(accessTechnology);
+    if (m_changeCallback) {
+      m_changeCallback(m_state, NetworkChangeOrigin::External);
+    }
+  });
 }
 
 void NetworkManagerService::readCellularState(
@@ -2393,7 +2449,7 @@ void NetworkManagerService::readCellularState(
       signalProxy->callMethodAsync("Get")
           .onInterface(kPropertiesInterface)
           .withArguments(kMmSignalInterface, "Lte")
-            .uponReplyInvoke([lifetimeToken, signalProxy, technology, done](
+          .uponReplyInvoke([lifetimeToken, signalProxy, technology, done](
                                std::optional<sdbus::Error> signalErr, sdbus::Variant signalValue
                            ) {
             if (lifetimeToken.expired()) {
@@ -2423,10 +2479,10 @@ void NetworkManagerService::readCellularState(
     );
     modemProxy->callMethodAsync("GetAll")
         .onInterface(kPropertiesInterface)
-      .withArguments(kMmModemInterface)
-      .uponReplyInvoke([lifetimeToken, modemProxy, technology, done, readLteRsrp](
-                 std::optional<sdbus::Error> signalErr,
-                 std::map<std::string, sdbus::Variant> properties
+        .withArguments(kMmModemInterface)
+        .uponReplyInvoke([lifetimeToken, modemProxy, technology, done, readLteRsrp](
+                             std::optional<sdbus::Error> signalErr,
+                             std::map<std::string, sdbus::Variant> properties
                          ) {
           if (lifetimeToken.expired()) {
             return;
