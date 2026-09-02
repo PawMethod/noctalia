@@ -2441,7 +2441,8 @@ void NetworkManagerService::readCellularState(
 ) {
   const std::weak_ptr<int> lifetimeToken = m_lifetimeToken;
   auto technology = std::make_shared<std::string>();
-  auto readLteRsrp = [this, lifetimeToken, modemPath, technology, done]() {
+  auto fallbackPercent = std::make_shared<std::uint8_t>(0);
+  auto readLteRsrp = [this, lifetimeToken, modemPath, technology, fallbackPercent, done]() {
     try {
       auto signalProxy = std::shared_ptr<sdbus::IProxy>(
           sdbus::createProxy(m_bus.connection(), kMmBusName, sdbus::ObjectPath{modemPath})
@@ -2449,13 +2450,13 @@ void NetworkManagerService::readCellularState(
       signalProxy->callMethodAsync("Get")
           .onInterface(kPropertiesInterface)
           .withArguments(kMmSignalInterface, "Lte")
-          .uponReplyInvoke([lifetimeToken, signalProxy, technology, done](
+            .uponReplyInvoke([lifetimeToken, signalProxy, technology, fallbackPercent, done](
                                std::optional<sdbus::Error> signalErr, sdbus::Variant signalValue
                            ) {
             if (lifetimeToken.expired()) {
               return;
             }
-            std::uint8_t percent = 0;
+            std::uint8_t percent = *fallbackPercent;
             if (!signalErr.has_value()) {
               try {
                 const auto lte = signalValue.get<std::map<std::string, sdbus::Variant>>();
@@ -2470,7 +2471,7 @@ void NetworkManagerService::readCellularState(
       return;
     } catch (const sdbus::Error&) {
     }
-    done(0, *technology);
+    done(*fallbackPercent, *technology);
   };
 
   try {
@@ -2480,7 +2481,7 @@ void NetworkManagerService::readCellularState(
     modemProxy->callMethodAsync("GetAll")
         .onInterface(kPropertiesInterface)
         .withArguments(kMmModemInterface)
-        .uponReplyInvoke([lifetimeToken, modemProxy, technology, done, readLteRsrp](
+        .uponReplyInvoke([lifetimeToken, modemProxy, technology, fallbackPercent, readLteRsrp](
                              std::optional<sdbus::Error> signalErr,
                              std::map<std::string, sdbus::Variant> properties
                          ) {
@@ -2501,11 +2502,7 @@ void NetworkManagerService::readCellularState(
             try {
               if (auto qualityIt = properties.find("SignalQuality"); qualityIt != properties.end()) {
                 const auto quality = qualityIt->second.get<sdbus::Struct<std::uint32_t, bool>>();
-                const std::uint32_t percent = std::min(std::get<0>(quality), 100U);
-                if (percent > 0U) {
-                  done(static_cast<std::uint8_t>(percent), *technology);
-                  return;
-                }
+                *fallbackPercent = static_cast<std::uint8_t>(std::min(std::get<0>(quality), 100U));
               }
             } catch (const sdbus::Error&) {
             }
