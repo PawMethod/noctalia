@@ -1,6 +1,7 @@
 #include "dbus/network/network_manager_service.h"
 
 #include "core/log.h"
+#include "dbus/network/network_display.h"
 #include "dbus/network/network_manager_security.h"
 #include "dbus/system_bus.h"
 #include "system/rfkill_helper.h"
@@ -28,6 +29,7 @@ namespace {
   const sdbus::ObjectPath kNmSettingsObjectPath{"/org/freedesktop/NetworkManager/Settings"};
   constexpr auto kNmSettingsConnectionInterface = "org.freedesktop.NetworkManager.Settings.Connection";
   constexpr auto kMmModemInterface = "org.freedesktop.ModemManager1.Modem";
+  constexpr auto kMmSignalInterface = "org.freedesktop.ModemManager1.Modem.Signal";
 
   // NM80211ApSecurityFlags bits we care about.
   constexpr std::uint32_t k_nm80211ApSecNone = 0x0;
@@ -2365,7 +2367,9 @@ void NetworkManagerService::bindModem(const std::string& modemPath) {
                   const std::string& interfaceName, const std::map<std::string, sdbus::Variant>& changedProperties,
                   const std::vector<std::string>& /*invalidatedProperties*/
               ) {
-          if (interfaceName == kMmModemInterface && changedProperties.contains("SignalQuality")) {
+          const bool qualityChanged = interfaceName == kMmModemInterface && changedProperties.contains("SignalQuality");
+          const bool lteSignalChanged = interfaceName == kMmSignalInterface && changedProperties.contains("Lte");
+          if (qualityChanged || lteSignalChanged) {
             refresh();
           }
         });
@@ -2373,6 +2377,74 @@ void NetworkManagerService::bindModem(const std::string& modemPath) {
     kLog.debug("modem proxy failed {}: {}", normalized, e.what());
     m_modem.reset();
   }
+}
+
+void NetworkManagerService::readCellularSignalStrength(
+    const std::string& modemPath, std::function<void(std::uint8_t)> done
+) {
+  const std::weak_ptr<int> lifetimeToken = m_lifetimeToken;
+  auto readLteRsrp = [this, lifetimeToken, modemPath, done]() {
+    try {
+      auto signalProxy = std::shared_ptr<sdbus::IProxy>(
+          sdbus::createProxy(m_bus.connection(), kMmBusName, sdbus::ObjectPath{modemPath})
+      );
+      signalProxy->callMethodAsync("Get")
+          .onInterface(kPropertiesInterface)
+          .withArguments(kMmSignalInterface, "Lte")
+          .uponReplyInvoke([lifetimeToken, signalProxy, done](
+                               std::optional<sdbus::Error> signalErr, sdbus::Variant signalValue
+                           ) {
+            if (lifetimeToken.expired()) {
+              return;
+            }
+            std::uint8_t percent = 0;
+            if (!signalErr.has_value()) {
+              try {
+                const auto lte = signalValue.get<std::map<std::string, sdbus::Variant>>();
+                if (auto rsrpIt = lte.find("rsrp"); rsrpIt != lte.end()) {
+                  percent = network_display::cellularSignalPercentFromRsrp(rsrpIt->second.get<double>());
+                }
+              } catch (const sdbus::Error&) {
+              }
+            }
+            done(percent);
+          });
+      return;
+    } catch (const sdbus::Error&) {
+    }
+    done(0);
+  };
+
+  try {
+    auto modemProxy = std::shared_ptr<sdbus::IProxy>(
+        sdbus::createProxy(m_bus.connection(), kMmBusName, sdbus::ObjectPath{modemPath})
+    );
+    modemProxy->callMethodAsync("Get")
+        .onInterface(kPropertiesInterface)
+        .withArguments(kMmModemInterface, "SignalQuality")
+        .uponReplyInvoke([lifetimeToken, modemProxy, done, readLteRsrp](
+                             std::optional<sdbus::Error> signalErr, sdbus::Variant signalValue
+                         ) {
+          if (lifetimeToken.expired()) {
+            return;
+          }
+          if (!signalErr.has_value()) {
+            try {
+              const auto quality = signalValue.get<sdbus::Struct<std::uint32_t, bool>>();
+              const std::uint32_t percent = std::min(std::get<0>(quality), 100U);
+              if (percent > 0U) {
+                done(static_cast<std::uint8_t>(percent));
+                return;
+              }
+            } catch (const sdbus::Error&) {
+            }
+          }
+          readLteRsrp();
+        });
+    return;
+  } catch (const sdbus::Error&) {
+  }
+  readLteRsrp();
 }
 
 void NetworkManagerService::rebindActiveAccessPoint(const std::string& apPath) {
@@ -2567,33 +2639,13 @@ void NetworkManagerService::readStateAsync(std::function<void(NetworkState)> onC
                 }
 
                 bindModem(modemPath);
-                try {
-                  auto modemProxy = std::shared_ptr<sdbus::IProxy>(
-                      sdbus::createProxy(m_bus.connection(), kMmBusName, sdbus::ObjectPath{modemPath})
-                  );
-                  modemProxy->callMethodAsync("Get")
-                      .onInterface(kPropertiesInterface)
-                      .withArguments(kMmModemInterface, "SignalQuality")
-                      .uponReplyInvoke([lifetimeToken, next, finish, modemProxy](
-                                           std::optional<sdbus::Error> signalErr, sdbus::Variant signalValue
-                                       ) {
-                        if (lifetimeToken.expired()) {
-                          return;
-                        }
-                        if (!signalErr.has_value()) {
-                          try {
-                            const auto quality = signalValue.get<sdbus::Struct<std::uint32_t, bool>>();
-                            next->cellularSignalStrength =
-                                static_cast<std::uint8_t>(std::min(std::get<0>(quality), 100U));
-                          } catch (const sdbus::Error&) {
-                          }
-                        }
-                        finish();
-                      });
-                  return;
-                } catch (const sdbus::Error&) {
-                }
-                finish();
+                readCellularSignalStrength(modemPath, [lifetimeToken, next, finish](std::uint8_t percent) {
+                  if (lifetimeToken.expired()) {
+                    return;
+                  }
+                  next->cellularSignalStrength = percent;
+                  finish();
+                });
               };
 
               if (ip4ConfigPath.empty() || ip4ConfigPath == "/") {

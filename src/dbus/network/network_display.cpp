@@ -2,6 +2,8 @@
 
 #include "dbus/network/network_types.h"
 
+#include <cmath>
+
 namespace network_display {
 
   const char* glyphForState(const NetworkState& state) noexcept {
@@ -38,6 +40,16 @@ namespace network_display {
       return "antenna-bars-1";
     }
     return "antenna";
+  }
+
+  std::uint8_t cellularSignalPercentFromRsrp(double rsrpDbm) noexcept {
+    if (!std::isfinite(rsrpDbm) || rsrpDbm <= -140.0) {
+      return 0;
+    }
+    if (rsrpDbm >= -44.0) {
+      return 100;
+    }
+    return static_cast<std::uint8_t>(std::lround((rsrpDbm + 140.0) * 100.0 / 96.0));
   }
 
   const char* wifiGlyphForState(const NetworkState& state) noexcept {
