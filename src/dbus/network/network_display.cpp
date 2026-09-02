@@ -47,13 +47,13 @@ namespace network_display {
   }
 
   std::uint8_t cellularSignalPercentFromRsrp(double rsrpDbm) noexcept {
-    if (!std::isfinite(rsrpDbm) || rsrpDbm <= -140.0) {
+    if (!std::isfinite(rsrpDbm) || rsrpDbm <= -110.0) {
       return 0;
     }
-    if (rsrpDbm >= -44.0) {
+    if (rsrpDbm >= -60.0) {
       return 100;
     }
-    return static_cast<std::uint8_t>(std::lround((rsrpDbm + 140.0) * 100.0 / 96.0));
+    return static_cast<std::uint8_t>((rsrpDbm + 110.0) * 2.0);
   }
 
   const char* cellularAccessTechnologyLabel(std::uint32_t technologies) noexcept {
