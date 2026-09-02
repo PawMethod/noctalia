@@ -62,6 +62,13 @@ namespace {
       if (const char* band = network_display::wifiFrequencyBandLabel(s.frequencyMhz); band != nullptr) {
         append(band);
       }
+    } else if (s.kind == NetworkConnectivity::Cellular) {
+      if (s.cellularSignalStrength > 0) {
+        append(std::to_string(static_cast<int>(s.cellularSignalStrength)) + "%");
+      }
+      if (!s.cellularAccessTechnology.empty()) {
+        append(s.cellularAccessTechnology);
+      }
     }
     if (!externalIp.empty()) {
       append(i18n::tr("control-center.network.external-ip", "ip", externalIp));

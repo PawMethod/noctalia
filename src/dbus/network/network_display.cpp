@@ -52,6 +52,34 @@ namespace network_display {
     return static_cast<std::uint8_t>(std::lround((rsrpDbm + 140.0) * 100.0 / 96.0));
   }
 
+  const char* cellularAccessTechnologyLabel(std::uint32_t technologies) noexcept {
+    if ((technologies & (1U << 15U)) != 0U) {
+      return "5G NR";
+    }
+    if ((technologies & (1U << 14U)) != 0U) {
+      return "LTE";
+    }
+    if ((technologies & (1U << 9U)) != 0U) {
+      return "HSPA+";
+    }
+    if ((technologies & (1U << 8U)) != 0U) {
+      return "HSPA";
+    }
+    if ((technologies & (1U << 5U)) != 0U) {
+      return "UMTS";
+    }
+    if ((technologies & (1U << 4U)) != 0U) {
+      return "EDGE";
+    }
+    if ((technologies & (1U << 3U)) != 0U) {
+      return "GPRS";
+    }
+    if ((technologies & (1U << 1U)) != 0U) {
+      return "GSM";
+    }
+    return nullptr;
+  }
+
   const char* wifiGlyphForState(const NetworkState& state) noexcept {
     if (!state.wirelessEnabled) {
       return "wifi-off";

@@ -2367,7 +2367,8 @@ void NetworkManagerService::bindModem(const std::string& modemPath) {
                   const std::string& interfaceName, const std::map<std::string, sdbus::Variant>& changedProperties,
                   const std::vector<std::string>& /*invalidatedProperties*/
               ) {
-          const bool qualityChanged = interfaceName == kMmModemInterface && changedProperties.contains("SignalQuality");
+            const bool qualityChanged = interfaceName == kMmModemInterface
+              && (changedProperties.contains("SignalQuality") || changedProperties.contains("AccessTechnologies"));
           const bool lteSignalChanged = interfaceName == kMmSignalInterface && changedProperties.contains("Lte");
           if (qualityChanged || lteSignalChanged) {
             refresh();
@@ -2379,11 +2380,12 @@ void NetworkManagerService::bindModem(const std::string& modemPath) {
   }
 }
 
-void NetworkManagerService::readCellularSignalStrength(
-    const std::string& modemPath, std::function<void(std::uint8_t)> done
+void NetworkManagerService::readCellularState(
+    const std::string& modemPath, std::function<void(std::uint8_t, std::string)> done
 ) {
   const std::weak_ptr<int> lifetimeToken = m_lifetimeToken;
-  auto readLteRsrp = [this, lifetimeToken, modemPath, done]() {
+  auto technology = std::make_shared<std::string>();
+  auto readLteRsrp = [this, lifetimeToken, modemPath, technology, done]() {
     try {
       auto signalProxy = std::shared_ptr<sdbus::IProxy>(
           sdbus::createProxy(m_bus.connection(), kMmBusName, sdbus::ObjectPath{modemPath})
@@ -2391,7 +2393,7 @@ void NetworkManagerService::readCellularSignalStrength(
       signalProxy->callMethodAsync("Get")
           .onInterface(kPropertiesInterface)
           .withArguments(kMmSignalInterface, "Lte")
-          .uponReplyInvoke([lifetimeToken, signalProxy, done](
+            .uponReplyInvoke([lifetimeToken, signalProxy, technology, done](
                                std::optional<sdbus::Error> signalErr, sdbus::Variant signalValue
                            ) {
             if (lifetimeToken.expired()) {
@@ -2407,34 +2409,47 @@ void NetworkManagerService::readCellularSignalStrength(
               } catch (const sdbus::Error&) {
               }
             }
-            done(percent);
+            done(percent, *technology);
           });
       return;
     } catch (const sdbus::Error&) {
     }
-    done(0);
+    done(0, *technology);
   };
 
   try {
     auto modemProxy = std::shared_ptr<sdbus::IProxy>(
         sdbus::createProxy(m_bus.connection(), kMmBusName, sdbus::ObjectPath{modemPath})
     );
-    modemProxy->callMethodAsync("Get")
+    modemProxy->callMethodAsync("GetAll")
         .onInterface(kPropertiesInterface)
-        .withArguments(kMmModemInterface, "SignalQuality")
-        .uponReplyInvoke([lifetimeToken, modemProxy, done, readLteRsrp](
-                             std::optional<sdbus::Error> signalErr, sdbus::Variant signalValue
+      .withArguments(kMmModemInterface)
+      .uponReplyInvoke([lifetimeToken, modemProxy, technology, done, readLteRsrp](
+                 std::optional<sdbus::Error> signalErr,
+                 std::map<std::string, sdbus::Variant> properties
                          ) {
           if (lifetimeToken.expired()) {
             return;
           }
           if (!signalErr.has_value()) {
+            if (auto accessIt = properties.find("AccessTechnologies"); accessIt != properties.end()) {
+              try {
+                if (const char* label =
+                        network_display::cellularAccessTechnologyLabel(accessIt->second.get<std::uint32_t>());
+                    label != nullptr) {
+                  *technology = label;
+                }
+              } catch (const sdbus::Error&) {
+              }
+            }
             try {
-              const auto quality = signalValue.get<sdbus::Struct<std::uint32_t, bool>>();
-              const std::uint32_t percent = std::min(std::get<0>(quality), 100U);
-              if (percent > 0U) {
-                done(static_cast<std::uint8_t>(percent));
-                return;
+              if (auto qualityIt = properties.find("SignalQuality"); qualityIt != properties.end()) {
+                const auto quality = qualityIt->second.get<sdbus::Struct<std::uint32_t, bool>>();
+                const std::uint32_t percent = std::min(std::get<0>(quality), 100U);
+                if (percent > 0U) {
+                  done(static_cast<std::uint8_t>(percent), *technology);
+                  return;
+                }
               }
             } catch (const sdbus::Error&) {
             }
@@ -2639,13 +2654,17 @@ void NetworkManagerService::readStateAsync(std::function<void(NetworkState)> onC
                 }
 
                 bindModem(modemPath);
-                readCellularSignalStrength(modemPath, [lifetimeToken, next, finish](std::uint8_t percent) {
-                  if (lifetimeToken.expired()) {
-                    return;
-                  }
-                  next->cellularSignalStrength = percent;
-                  finish();
-                });
+                readCellularState(
+                    modemPath,
+                    [lifetimeToken, next, finish](std::uint8_t percent, std::string accessTechnology) {
+                      if (lifetimeToken.expired()) {
+                        return;
+                      }
+                      next->cellularSignalStrength = percent;
+                      next->cellularAccessTechnology = std::move(accessTechnology);
+                      finish();
+                    }
+                );
               };
 
               if (ip4ConfigPath.empty() || ip4ConfigPath == "/") {

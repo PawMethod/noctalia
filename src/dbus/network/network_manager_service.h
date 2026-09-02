@@ -106,7 +106,9 @@ private:
   void rebindActiveDevice(const std::string& devicePath);
   void rebindActiveAccessPoint(const std::string& apPath);
   void bindModem(const std::string& modemPath);
-  void readCellularSignalStrength(const std::string& modemPath, std::function<void(std::uint8_t)> done);
+  void readCellularState(
+      const std::string& modemPath, std::function<void(std::uint8_t, std::string)> done
+  );
   void ensureWifiDeviceSubscribed(const std::string& devicePath);
   void
   collectWifiDevices(std::function<void(std::vector<std::string> devicePaths, std::int64_t lastScanBaseline)> done);

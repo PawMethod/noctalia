@@ -42,5 +42,14 @@ int main() {
   TEST_CHECK(network_display::cellularSignalPercentFromRsrp(-43.0) == 100);
   TEST_CHECK(network_display::cellularSignalPercentFromRsrp(std::numeric_limits<double>::quiet_NaN()) == 0);
 
+  TEST_CHECK(network_display::cellularAccessTechnologyLabel(0) == nullptr);
+  TEST_CHECK(std::string_view(network_display::cellularAccessTechnologyLabel(1U << 1U)) == "GSM");
+  TEST_CHECK(std::string_view(network_display::cellularAccessTechnologyLabel(1U << 5U)) == "UMTS");
+  TEST_CHECK(std::string_view(network_display::cellularAccessTechnologyLabel(1U << 14U)) == "LTE");
+  TEST_CHECK(std::string_view(network_display::cellularAccessTechnologyLabel(1U << 15U)) == "5G NR");
+  TEST_CHECK(
+      std::string_view(network_display::cellularAccessTechnologyLabel((1U << 14U) | (1U << 15U))) == "5G NR"
+  );
+
   return 0;
 }
