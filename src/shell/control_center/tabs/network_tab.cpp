@@ -1093,7 +1093,7 @@ void NetworkTab::rebuildApList(Renderer& renderer) {
   } else {
     const float opacity = panelCardOpacity();
 
-    if (!cellular.empty()) {
+    if (!cellular.empty() || m_network->state().cellularEnabled) {
       auto cellularCard = ui::column({
           .configure = [scale, opacity](Flex& card) { applySectionCardStyle(card, scale, opacity); },
       });
