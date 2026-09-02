@@ -21,7 +21,18 @@ namespace network_display {
       return "antenna-bars-off";
     }
     if (state.kind == NetworkConnectivity::Cellular && state.connected) {
-      return "antenna-bars-5";
+      switch (wifiSignalBand(state.cellularSignalStrength)) {
+      case 4:
+        return "antenna-bars-5";
+      case 3:
+        return "antenna-bars-4";
+      case 2:
+        return "antenna-bars-3";
+      case 1:
+        return "antenna-bars-2";
+      default:
+        return "antenna-bars-1";
+      }
     }
     if (state.resolving) {
       return "antenna-bars-1";

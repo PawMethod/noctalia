@@ -19,6 +19,7 @@ namespace {
   constexpr Logger kLog("network");
 
   const sdbus::ServiceName kNmBusName{"org.freedesktop.NetworkManager"};
+  const sdbus::ServiceName kMmBusName{"org.freedesktop.ModemManager1"};
   const sdbus::ObjectPath kNmObjectPath{"/org/freedesktop/NetworkManager"};
   constexpr auto kNmInterface = "org.freedesktop.NetworkManager";
   constexpr auto kNmDeviceInterface = "org.freedesktop.NetworkManager.Device";
@@ -26,6 +27,7 @@ namespace {
   constexpr auto kNmSettingsInterface = "org.freedesktop.NetworkManager.Settings";
   const sdbus::ObjectPath kNmSettingsObjectPath{"/org/freedesktop/NetworkManager/Settings"};
   constexpr auto kNmSettingsConnectionInterface = "org.freedesktop.NetworkManager.Settings.Connection";
+  constexpr auto kMmModemInterface = "org.freedesktop.ModemManager1.Modem";
 
   // NM80211ApSecurityFlags bits we care about.
   constexpr std::uint32_t k_nm80211ApSecNone = 0x0;
@@ -2275,6 +2277,7 @@ void NetworkManagerService::rebindActiveDevice(const std::string& devicePath) {
   m_activeDevicePath = normalized;
   m_activeDevice.reset();
   rebindActiveAccessPoint({});
+  bindModem({});
 
   if (normalized.empty()) {
     return;
@@ -2340,6 +2343,35 @@ void NetworkManagerService::rebindActiveDevice(const std::string& devicePath) {
         });
   } catch (const sdbus::Error& e) {
     kLog.debug("device wireless probe failed {}: {}", normalized, e.what());
+  }
+}
+
+void NetworkManagerService::bindModem(const std::string& modemPath) {
+  const std::string normalized = (modemPath.empty() || modemPath == "/") ? std::string{} : modemPath;
+  if (normalized == m_modemPath && (normalized.empty() || m_modem != nullptr)) {
+    return;
+  }
+  m_modemPath = normalized;
+  m_modem.reset();
+  if (normalized.empty()) {
+    return;
+  }
+
+  try {
+    m_modem = sdbus::createProxy(m_bus.connection(), kMmBusName, sdbus::ObjectPath{normalized});
+    m_modem->uponSignal("PropertiesChanged")
+        .onInterface(kPropertiesInterface)
+        .call([this](
+                  const std::string& interfaceName, const std::map<std::string, sdbus::Variant>& changedProperties,
+                  const std::vector<std::string>& /*invalidatedProperties*/
+              ) {
+          if (interfaceName == kMmModemInterface && changedProperties.contains("SignalQuality")) {
+            refresh();
+          }
+        });
+  } catch (const sdbus::Error& e) {
+    kLog.debug("modem proxy failed {}: {}", normalized, e.what());
+    m_modem.reset();
   }
 }
 
@@ -2486,6 +2518,16 @@ void NetworkManagerService::readStateAsync(std::function<void(NetworkState)> onC
                 }
               }
 
+              std::string modemPath;
+              if (deviceType == kNmDeviceTypeModem) {
+                if (auto udiIt = deviceProperties.find("Udi"); udiIt != deviceProperties.end()) {
+                  try {
+                    modemPath = udiIt->second.get<std::string>();
+                  } catch (const sdbus::Error&) {
+                  }
+                }
+              }
+
               std::string ip4ConfigPath;
               if (auto ip4It = deviceProperties.find("Ip4Config"); ip4It != deviceProperties.end()) {
                 try {
@@ -2510,15 +2552,48 @@ void NetworkManagerService::readStateAsync(std::function<void(NetworkState)> onC
               // Remaining device types (wireguard, tun, …) are VPN/overlay virtual
               // links and must not be reported as wired; kind stays Unknown.
 
-              auto finishAfterIp4 = [lifetimeToken, finish, readActiveAccessPoint, deviceType]() {
+              auto finishAfterIp4 =
+                  [this, lifetimeToken, next, finish, readActiveAccessPoint, deviceType, modemPath]() {
                 if (lifetimeToken.expired()) {
                   return;
                 }
                 if (deviceType == kNmDeviceTypeWifi) {
                   readActiveAccessPoint();
-                } else {
-                  finish();
+                  return;
                 }
+                if (deviceType != kNmDeviceTypeModem || modemPath.empty() || modemPath == "/") {
+                  finish();
+                  return;
+                }
+
+                bindModem(modemPath);
+                try {
+                  auto modemProxy = std::shared_ptr<sdbus::IProxy>(
+                      sdbus::createProxy(m_bus.connection(), kMmBusName, sdbus::ObjectPath{modemPath})
+                  );
+                  modemProxy->callMethodAsync("Get")
+                      .onInterface(kPropertiesInterface)
+                      .withArguments(kMmModemInterface, "SignalQuality")
+                      .uponReplyInvoke([lifetimeToken, next, finish, modemProxy](
+                                           std::optional<sdbus::Error> signalErr, sdbus::Variant signalValue
+                                       ) {
+                        if (lifetimeToken.expired()) {
+                          return;
+                        }
+                        if (!signalErr.has_value()) {
+                          try {
+                            const auto quality = signalValue.get<sdbus::Struct<std::uint32_t, bool>>();
+                            next->cellularSignalStrength =
+                                static_cast<std::uint8_t>(std::min(std::get<0>(quality), 100U));
+                          } catch (const sdbus::Error&) {
+                          }
+                        }
+                        finish();
+                      });
+                  return;
+                } catch (const sdbus::Error&) {
+                }
+                finish();
               };
 
               if (ip4ConfigPath.empty() || ip4ConfigPath == "/") {

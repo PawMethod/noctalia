@@ -23,6 +23,15 @@ int main() {
 
   state.resolving = false;
   state.connected = true;
+  TEST_CHECK(std::string_view(network_display::glyphForState(state)) == "antenna-bars-1");
+
+  state.cellularSignalStrength = 15;
+  TEST_CHECK(std::string_view(network_display::glyphForState(state)) == "antenna-bars-2");
+  state.cellularSignalStrength = 35;
+  TEST_CHECK(std::string_view(network_display::glyphForState(state)) == "antenna-bars-3");
+  state.cellularSignalStrength = 60;
+  TEST_CHECK(std::string_view(network_display::glyphForState(state)) == "antenna-bars-4");
+  state.cellularSignalStrength = 80;
   TEST_CHECK(std::string_view(network_display::glyphForState(state)) == "antenna-bars-5");
 
   return 0;

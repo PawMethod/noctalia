@@ -105,6 +105,7 @@ private:
   void adoptActiveConnection(const std::string& connectionPath, const std::string& devicePath);
   void rebindActiveDevice(const std::string& devicePath);
   void rebindActiveAccessPoint(const std::string& apPath);
+  void bindModem(const std::string& modemPath);
   void ensureWifiDeviceSubscribed(const std::string& devicePath);
   void
   collectWifiDevices(std::function<void(std::vector<std::string> devicePaths, std::int64_t lastScanBaseline)> done);
@@ -121,11 +122,13 @@ private:
   std::unique_ptr<sdbus::IProxy> m_activeConnection;
   std::unique_ptr<sdbus::IProxy> m_activeDevice;
   std::unique_ptr<sdbus::IProxy> m_activeAp;
+  std::unique_ptr<sdbus::IProxy> m_modem;
   std::unordered_map<std::string, std::unique_ptr<sdbus::IProxy>> m_wifiDevices;
   std::unordered_map<std::string, std::unique_ptr<sdbus::IProxy>> m_vpnActiveWatchers;
   std::string m_activeConnectionPath;
   std::string m_activeDevicePath;
   std::string m_activeApPath;
+  std::string m_modemPath;
   NetworkState m_state;
   std::vector<AccessPointInfo> m_accessPoints;
   std::vector<VpnConnectionInfo> m_vpnConnections;
