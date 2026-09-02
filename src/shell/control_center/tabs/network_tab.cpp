@@ -25,6 +25,11 @@ namespace {
 
   constexpr float kRowMinHeight = Style::controlHeightLg;
 
+  bool isValidSimPin(std::string_view value) {
+    return value.size() >= 4 && value.size() <= 8
+        && std::ranges::all_of(value, [](char digit) { return digit >= '0' && digit <= '9'; });
+  }
+
   std::string percentText(std::uint8_t percent) { return std::to_string(static_cast<int>(percent)) + "%"; }
 
   std::string currentTitle(const NetworkState& s) {
@@ -432,7 +437,11 @@ NetworkTab::NetworkTab(INetworkService* network, NetworkSecretAgent* secrets, Ex
   if (m_secrets != nullptr) {
     m_secrets->setRequestCallback([this](const NetworkSecretAgent::SecretRequest& request) {
       showPasswordPrompt(request);
-      PanelManager::instance().refresh();
+      if (request.kind == NetworkSecretAgent::SecretKind::SimPin) {
+        PanelManager::instance().openPanel("control-center", PanelOpenRequest{.context = "network"});
+      } else {
+        PanelManager::instance().refresh();
+      }
     });
   }
 }
@@ -661,16 +670,32 @@ void NetworkTab::syncPasswordCard() {
   }
   m_passwordCard->setVisible(m_hasPendingSecret);
   if (m_hasPendingSecret && m_passwordTitle != nullptr) {
-    m_passwordTitle->setText(
-        m_pendingSsid.empty() ? i18n::tr("control-center.network.password-prompt")
-                              : i18n::tr("control-center.network.password-prompt-for", "ssid", m_pendingSsid)
-    );
+    const bool simPin = m_pendingSecretKind == NetworkSecretAgent::SecretKind::SimPin;
+    if (simPin) {
+      m_passwordTitle->setText(
+          m_pendingSecretName.empty()
+              ? i18n::tr("control-center.network.sim-pin-prompt")
+              : i18n::tr("control-center.network.sim-pin-prompt-for", "connection", m_pendingSecretName)
+      );
+    } else {
+      m_passwordTitle->setText(
+          m_pendingSecretName.empty()
+              ? i18n::tr("control-center.network.password-prompt")
+              : i18n::tr("control-center.network.password-prompt-for", "ssid", m_pendingSecretName)
+      );
+    }
+    if (m_passwordInput != nullptr) {
+      m_passwordInput->setPlaceholder(
+          i18n::tr(simPin ? "control-center.network.sim-pin" : "control-center.network.password")
+      );
+    }
   }
 }
 
 void NetworkTab::showPasswordPrompt(const NetworkSecretAgent::SecretRequest& request) {
   m_hasPendingSecret = true;
-  m_pendingSsid = request.ssid;
+  m_pendingSecretKind = request.kind;
+  m_pendingSecretName = request.connectionName;
   m_pendingAccessPoint.reset();
   m_passwordRevealed = false;
   if (m_passwordInput != nullptr) {
@@ -684,7 +709,8 @@ void NetworkTab::showPasswordPrompt(const NetworkSecretAgent::SecretRequest& req
 
 void NetworkTab::showPasswordPrompt(const AccessPointInfo& ap) {
   m_hasPendingSecret = true;
-  m_pendingSsid = ap.ssid;
+  m_pendingSecretKind = NetworkSecretAgent::SecretKind::WifiPsk;
+  m_pendingSecretName = ap.ssid;
   m_pendingAccessPoint = ap;
   m_passwordRevealed = false;
   if (m_passwordInput != nullptr) {
@@ -697,6 +723,12 @@ void NetworkTab::showPasswordPrompt(const AccessPointInfo& ap) {
 }
 
 void NetworkTab::submitPasswordPrompt(const std::string& value) {
+  if (m_pendingSecretKind == NetworkSecretAgent::SecretKind::SimPin && !isValidSimPin(value)) {
+    if (m_passwordInput != nullptr) {
+      m_passwordInput->setInvalid(true);
+    }
+    return;
+  }
   if (m_pendingAccessPoint.has_value()) {
     if (value.empty()) {
       return;
@@ -721,12 +753,14 @@ void NetworkTab::cancelPasswordPrompt() {
 
 void NetworkTab::clearPasswordPrompt() {
   m_hasPendingSecret = false;
-  m_pendingSsid.clear();
+  m_pendingSecretKind = NetworkSecretAgent::SecretKind::WifiPsk;
+  m_pendingSecretName.clear();
   m_pendingAccessPoint.reset();
   m_passwordRevealed = false;
   if (m_passwordInput != nullptr) {
     m_passwordInput->setValue("");
     m_passwordInput->setPasswordMode(true);
+    m_passwordInput->setInvalid(false);
   }
   if (m_passwordRevealButton != nullptr) {
     m_passwordRevealButton->setGlyph("eye");

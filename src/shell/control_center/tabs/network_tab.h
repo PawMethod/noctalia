@@ -90,7 +90,8 @@ private:
   float m_lastListWidth = -1.0F;
 
   bool m_hasPendingSecret = false;
-  std::string m_pendingSsid;
+  NetworkSecretAgent::SecretKind m_pendingSecretKind = NetworkSecretAgent::SecretKind::WifiPsk;
+  std::string m_pendingSecretName;
   std::optional<AccessPointInfo> m_pendingAccessPoint;
   bool m_active = false;
 
