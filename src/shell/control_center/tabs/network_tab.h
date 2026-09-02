@@ -43,6 +43,8 @@ private:
   void beginPendingAction(bool wasConnected);
   void requestWirelessEnabled(bool enabled);
   void handleWirelessEnabledCompletion(std::uint64_t generation, bool success);
+  void requestCellularEnabled(bool enabled);
+  void handleCellularEnabledCompletion(std::uint64_t generation, bool success);
   void rebuildApList(Renderer& renderer);
   // Pushes live signal values into the existing rows. Returns true if any changed.
   bool syncApRows();
@@ -53,7 +55,10 @@ private:
   void cancelPasswordPrompt();
   void clearPasswordPrompt();
   [[nodiscard]] std::string
-  structureKey(const std::vector<AccessPointInfo>& aps, const std::vector<VpnConnectionInfo>& vpns) const;
+  structureKey(
+      const std::vector<AccessPointInfo>& aps, const std::vector<VpnConnectionInfo>& vpns,
+      const std::vector<CellularConnectionInfo>& cellular
+  ) const;
 
   INetworkService* m_network = nullptr;
   NetworkSecretAgent* m_secrets = nullptr;
@@ -73,6 +78,7 @@ private:
 
   Button* m_rescanButton = nullptr;
   Toggle* m_wifiToggle = nullptr;
+  Toggle* m_cellularToggle = nullptr;
   Flex* m_currentRow = nullptr;
   Button* m_disconnectButton = nullptr;
   Spinner* m_scanSpinner = nullptr;
@@ -99,6 +105,11 @@ private:
   bool m_wifiToggleWriteComplete = false;
   bool m_wifiToggleTargetObserved = false;
   std::uint64_t m_wifiToggleRequestGeneration = 0;
+  bool m_cellularTogglePending = false;
+  bool m_cellularToggleTarget = false;
+  bool m_cellularToggleWriteComplete = false;
+  bool m_cellularToggleTargetObserved = false;
+  std::uint64_t m_cellularToggleRequestGeneration = 0;
 
   Timer m_actionPendingTimer;
 

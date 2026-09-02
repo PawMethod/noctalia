@@ -23,11 +23,20 @@ struct VpnConnectionInfo {
   bool operator==(const VpnConnectionInfo&) const = default;
 };
 
+struct CellularConnectionInfo {
+  std::string path; // NetworkManager settings connection object path.
+  std::string name;
+  bool active = false;
+
+  bool operator==(const CellularConnectionInfo&) const = default;
+};
+
 enum class NetworkConnectivity {
   Unknown = 0,
   None = 1,
   Wired = 2,
   Wireless = 3,
+  Cellular = 4,
 };
 
 struct NetworkState {
@@ -35,10 +44,12 @@ struct NetworkState {
   bool connected = false;
   bool resolving = false; // active connection is activating, not yet connected
   bool wirelessEnabled = false;
+  bool cellularEnabled = false;
   bool scanning = false;
   bool vpnActive = false;          // a VPN connection is active or activating
   bool vpnConnected = false;       // a VPN tunnel is fully activated (routes applied)
   std::string ssid;                // Wi-Fi only
+  std::string connectionName;      // Active NetworkManager profile name.
   std::string ipv4;                // dotted-quad of first address; empty if none
   std::string interfaceName;       // e.g. "wlan0", "eth0"
   std::uint8_t signalStrength = 0; // 0..100, Wi-Fi only

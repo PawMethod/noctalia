@@ -25,12 +25,17 @@ namespace {
 
   constexpr float kRowMinHeight = Style::controlHeightLg;
 
+  std::string percentText(std::uint8_t percent) { return std::to_string(static_cast<int>(percent)) + "%"; }
+
   std::string currentTitle(const NetworkState& s) {
     if (s.kind == NetworkConnectivity::Wireless && s.connected && !s.ssid.empty()) {
       return s.ssid;
     }
     if (s.kind == NetworkConnectivity::Wired && s.connected) {
       return s.interfaceName.empty() ? i18n::tr("control-center.network.wired-connection") : s.interfaceName;
+    }
+    if (s.kind == NetworkConnectivity::Cellular && s.connected) {
+      return s.connectionName.empty() ? i18n::tr("control-center.network.cellular") : s.connectionName;
     }
     return i18n::tr("control-center.network.not-connected");
   }
@@ -63,8 +68,6 @@ namespace {
     }
     return out;
   }
-
-  std::string percentText(std::uint8_t percent) { return std::to_string(static_cast<int>(percent)) + "%"; }
 
   std::unique_ptr<Flex> makeWifiBucketHeaderRow(const std::string& title, float scale) {
     auto row = ui::row({
@@ -277,13 +280,13 @@ private:
 
 namespace {
 
-  class VpnConnectionRow : public Flex {
+  class ConnectionProfileRow : public Flex {
   public:
-    VpnConnectionRow(
-        float scale, VpnConnectionInfo vpn, std::function<void(const VpnConnectionInfo&)> onActivate,
-        std::function<void(const VpnConnectionInfo&)> onDeactivate
+    ConnectionProfileRow(
+        float scale, std::string name, bool active, std::string glyph, std::function<void()> onActivate,
+        std::function<void()> onDeactivate
     )
-        : m_vpn(std::move(vpn)), m_onActivate(std::move(onActivate)), m_onDeactivate(std::move(onDeactivate)) {
+        : m_active(active), m_onActivate(std::move(onActivate)), m_onDeactivate(std::move(onDeactivate)) {
       setDirection(FlexDirection::Horizontal);
       setAlign(FlexAlign::Center);
       setGap(Style::spaceSm * scale);
@@ -294,13 +297,21 @@ namespace {
       clearBorder();
 
       addChild(
+          ui::glyph({
+              .glyph = std::move(glyph),
+              .glyphSize = Style::baseGlyphSize * scale,
+              .color = colorSpecFromRole(ColorRole::OnSurfaceVariant),
+          })
+      );
+
+        addChild(
           ui::label({
               .out = &m_title,
-              .text = m_vpn.name,
+              .text = std::move(name),
               .fontSize = Style::fontSizeBody * scale,
-              .fontWeight = m_vpn.active ? FontWeight::Bold : FontWeight::Normal,
+              .fontWeight = m_active ? FontWeight::Bold : FontWeight::Normal,
               .color = colorSpecFromRole(ColorRole::OnSurface),
-              .flexGrow = 1.0F,
+            .flexGrow = 1.0F,
           })
       );
 
@@ -312,16 +323,16 @@ namespace {
               .variant = ButtonVariant::Ghost,
               .padding = Style::spaceXs * scale,
               .radius = Style::scaledRadiusSm(scale),
-              .opacity = m_vpn.active ? 1.0F : 0.0F,
+              .opacity = m_active ? 1.0F : 0.0F,
           })
       );
 
       addChild(
           ui::button({
               .out = &m_actionButton,
-              .glyph = m_vpn.active ? "plug-off" : "plug",
+              .glyph = m_active ? "plug-off" : "plug",
               .glyphSize = Style::baseGlyphSize * scale,
-              .variant = m_vpn.active ? ButtonVariant::Destructive : ButtonVariant::Default,
+              .variant = m_active ? ButtonVariant::Destructive : ButtonVariant::Default,
               .padding = Style::spaceXs * scale,
               .radius = Style::scaledRadiusSm(scale),
               .onClick = [this]() { triggerAction(); },
@@ -364,13 +375,13 @@ namespace {
 
   private:
     void triggerAction() {
-      if (m_vpn.active) {
+      if (m_active) {
         if (m_onDeactivate) {
-          m_onDeactivate(m_vpn);
+          m_onDeactivate();
         }
       } else {
         if (m_onActivate) {
-          m_onActivate(m_vpn);
+          m_onActivate();
         }
       }
     }
@@ -397,9 +408,9 @@ namespace {
       }
     }
 
-    VpnConnectionInfo m_vpn;
-    std::function<void(const VpnConnectionInfo&)> m_onActivate;
-    std::function<void(const VpnConnectionInfo&)> m_onDeactivate;
+    bool m_active = false;
+    std::function<void()> m_onActivate;
+    std::function<void()> m_onDeactivate;
     Label* m_title = nullptr;
     Button* m_checkButton = nullptr;
     Button* m_actionButton = nullptr;
@@ -616,6 +627,7 @@ void NetworkTab::onClose() {
   m_list = nullptr;
   m_rescanButton = nullptr;
   m_wifiToggle = nullptr;
+  m_cellularToggle = nullptr;
   m_scanSpinner = nullptr;
   m_currentRow = nullptr;
   m_disconnectButton = nullptr;
@@ -630,6 +642,10 @@ void NetworkTab::onClose() {
   m_wifiToggleWriteComplete = false;
   m_wifiToggleTargetObserved = false;
   ++m_wifiToggleRequestGeneration;
+  m_cellularTogglePending = false;
+  m_cellularToggleWriteComplete = false;
+  m_cellularToggleTargetObserved = false;
+  ++m_cellularToggleRequestGeneration;
 }
 
 void NetworkTab::syncPasswordCard() {
@@ -741,6 +757,16 @@ void NetworkTab::syncCurrentCard() {
       m_wifiToggleTargetObserved = false;
     }
   }
+  if (m_cellularTogglePending) {
+    if (s.cellularEnabled == m_cellularToggleTarget) {
+      m_cellularToggleTargetObserved = true;
+    }
+    if (m_cellularToggleWriteComplete && m_cellularToggleTargetObserved) {
+      m_cellularTogglePending = false;
+      m_cellularToggleWriteComplete = false;
+      m_cellularToggleTargetObserved = false;
+    }
+  }
   static const std::string kNoExternalIp;
   const std::string& externalIp = m_externalIpService != nullptr ? m_externalIpService->externalIp() : kNoExternalIp;
   m_currentTitle->setText(currentTitle(s));
@@ -755,6 +781,10 @@ void NetworkTab::syncCurrentCard() {
   if (m_wifiToggle != nullptr) {
     m_wifiToggle->setChecked(m_wifiTogglePending ? m_wifiToggleTarget : s.wirelessEnabled);
     m_wifiToggle->setEnabled(!m_wifiTogglePending);
+  }
+  if (m_cellularToggle != nullptr) {
+    m_cellularToggle->setChecked(m_cellularTogglePending ? m_cellularToggleTarget : s.cellularEnabled);
+    m_cellularToggle->setEnabled(!m_cellularTogglePending);
   }
   if (m_scanSpinner != nullptr) {
     m_scanSpinner->setVisible(s.scanning);
@@ -810,12 +840,46 @@ void NetworkTab::handleWirelessEnabledCompletion(std::uint64_t generation, bool 
   PanelManager::instance().requestRedraw();
 }
 
+void NetworkTab::requestCellularEnabled(bool enabled) {
+  m_cellularTogglePending = true;
+  m_cellularToggleTarget = enabled;
+  m_cellularToggleWriteComplete = false;
+  m_cellularToggleTargetObserved = false;
+  const std::uint64_t generation = ++m_cellularToggleRequestGeneration;
+  if (m_cellularToggle != nullptr) {
+    m_cellularToggle->setEnabled(false);
+  }
+  if (m_network == nullptr) {
+    handleCellularEnabledCompletion(generation, false);
+    return;
+  }
+  m_network->setCellularEnabled(enabled, [this, generation](bool success) {
+    handleCellularEnabledCompletion(generation, success);
+  });
+}
+
+void NetworkTab::handleCellularEnabledCompletion(std::uint64_t generation, bool success) {
+  if (!m_cellularTogglePending || generation != m_cellularToggleRequestGeneration) {
+    return;
+  }
+  m_cellularToggleWriteComplete = success;
+  if (!success) {
+    m_cellularTogglePending = false;
+    m_cellularToggleTargetObserved = false;
+  }
+  PanelManager::instance().requestUpdateOnly();
+  PanelManager::instance().requestRedraw();
+}
+
 // Identity of the built list: which rows exist, in which order, which controls
 // each carries, and how each activates. The signal strength is absent by design —
 // it refreshes in place through syncApRows(), so a scan update no longer tears the
 // list down. Access points arrive sorted, so a change in row order changes the key.
 std::string
-NetworkTab::structureKey(const std::vector<AccessPointInfo>& aps, const std::vector<VpnConnectionInfo>& vpns) const {
+NetworkTab::structureKey(
+  const std::vector<AccessPointInfo>& aps, const std::vector<VpnConnectionInfo>& vpns,
+  const std::vector<CellularConnectionInfo>& cellular
+) const {
   std::string key;
   for (const auto& ap : aps) {
     key += ap.ssid;
@@ -836,6 +900,15 @@ NetworkTab::structureKey(const std::vector<AccessPointInfo>& aps, const std::vec
     key += vpn.name;
     key.push_back(':');
     key += vpn.active ? '1' : '0';
+    key.push_back('\n');
+  }
+  key += "---\n";
+  for (const auto& connection : cellular) {
+    key += connection.path;
+    key.push_back(':');
+    key += connection.name;
+    key.push_back(':');
+    key += connection.active ? '1' : '0';
     key.push_back('\n');
   }
   const bool wirelessEnabled = m_network != nullptr && m_network->state().wirelessEnabled;
@@ -864,7 +937,9 @@ void NetworkTab::rebuildApList(Renderer& renderer) {
     aps = sortedAccessPoints(m_network->accessPoints());
   }
   const auto& vpns = m_network != nullptr ? m_network->vpnConnections() : std::vector<VpnConnectionInfo>{};
-  const std::string nextStructure = structureKey(aps, vpns);
+  const auto& cellular =
+      m_network != nullptr ? m_network->cellularConnections() : std::vector<CellularConnectionInfo>{};
+  const std::string nextStructure = structureKey(aps, vpns, cellular);
   if (listWidth == m_lastListWidth && nextStructure == m_lastStructureKey) {
     return;
   }
@@ -977,6 +1052,44 @@ void NetworkTab::rebuildApList(Renderer& renderer) {
   } else {
     const float opacity = panelCardOpacity();
 
+    if (!cellular.empty()) {
+      auto cellularCard = ui::column({
+          .configure = [scale, opacity](Flex& card) { applySectionCardStyle(card, scale, opacity); },
+      });
+        auto cellularHeader = makeCardHeaderRow(i18n::tr("control-center.network.cellular"), scale);
+        cellularHeader->addChild(
+          ui::toggle({
+            .out = &m_cellularToggle,
+            .checkedImmediate = m_network->state().cellularEnabled,
+            .toggleSize = ToggleSize::Medium,
+            .scale = scale,
+            .onChange = [this](bool checked) { requestCellularEnabled(checked); },
+          })
+        );
+        cellularCard->addChild(std::move(cellularHeader));
+
+      for (const auto& connection : cellular) {
+        auto row = std::make_unique<ConnectionProfileRow>(
+            scale, connection.name, connection.active, "antenna-bars-5",
+            [this, connection]() {
+              if (m_network != nullptr) {
+                m_network->activateCellularConnection(connection);
+              }
+              PanelManager::instance().refresh();
+            },
+            [this, connection]() {
+              if (m_network != nullptr) {
+                m_network->deactivateCellularConnection(connection);
+              }
+              PanelManager::instance().refresh();
+            }
+        );
+        cellularCard->addChild(std::move(row));
+      }
+
+      m_list->addChild(std::move(cellularCard));
+    }
+
     if (!vpns.empty()) {
       auto vpnCard = ui::column({
           .configure = [scale, opacity](Flex& card) { applySectionCardStyle(card, scale, opacity); },
@@ -1005,17 +1118,17 @@ void NetworkTab::rebuildApList(Renderer& renderer) {
 
       if (m_vpnVisible) {
         for (const auto& vpn : vpns) {
-          auto row = std::make_unique<VpnConnectionRow>(
-              scale, vpn,
-              [this](const VpnConnectionInfo& clicked) {
+          auto row = std::make_unique<ConnectionProfileRow>(
+              scale, vpn.name, vpn.active, "shield-lock",
+              [this, vpn]() {
                 if (m_network != nullptr) {
-                  m_network->activateVpnConnection(clicked);
+                  m_network->activateVpnConnection(vpn);
                 }
                 PanelManager::instance().refresh();
               },
-              [this](const VpnConnectionInfo& clicked) {
+              [this, vpn]() {
                 if (m_network != nullptr) {
-                  m_network->deactivateVpnConnection(clicked);
+                  m_network->deactivateVpnConnection(vpn);
                 }
                 PanelManager::instance().refresh();
               }

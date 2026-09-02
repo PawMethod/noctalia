@@ -8,10 +8,26 @@ namespace network_display {
     if (state.kind == NetworkConnectivity::Wired) {
       return state.connected ? "ethernet" : "ethernet-off";
     }
+    if (state.kind == NetworkConnectivity::Cellular) {
+      return cellularGlyphForState(state);
+    }
     return wifiGlyphForState(state);
   }
 
   const char* vpnGlyph() noexcept { return "shield-check"; }
+
+  const char* cellularGlyphForState(const NetworkState& state) noexcept {
+    if (!state.cellularEnabled) {
+      return "antenna-bars-off";
+    }
+    if (state.kind == NetworkConnectivity::Cellular && state.connected) {
+      return "antenna-bars-5";
+    }
+    if (state.resolving) {
+      return "antenna-bars-1";
+    }
+    return "antenna";
+  }
 
   const char* wifiGlyphForState(const NetworkState& state) noexcept {
     if (!state.wirelessEnabled) {

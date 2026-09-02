@@ -271,6 +271,7 @@
     },
     "network": {
       "available": "Available",
+      "cellular": "Mobile broadband",
       "connect": "Connect",
       "current-connection": "Current Connection",
       "external-ip": "WAN {ip}",

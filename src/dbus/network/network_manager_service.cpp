@@ -40,10 +40,12 @@ namespace {
   constexpr std::string_view kNmWiredConnectionType = "802-3-ethernet";
   constexpr std::string_view kNmVpnConnectionType = "vpn";
   constexpr std::string_view kNmWireguardConnectionType = "wireguard";
+  constexpr std::string_view kNmCellularConnectionType = "gsm";
 
   // NMDeviceType values from NetworkManager D-Bus API.
   constexpr std::uint32_t kNmDeviceTypeEthernet = 1;
   constexpr std::uint32_t kNmDeviceTypeWifi = 2;
+  constexpr std::uint32_t kNmDeviceTypeModem = 8;
   // Aggregating/virtual links that carry a wired L3 connection (a default-route
   // bridge/bond is the user's real LAN link, shown as wired).
   constexpr std::uint32_t kNmDeviceTypeBond = 10;
@@ -81,6 +83,7 @@ namespace {
   struct PendingRefresh {
     std::vector<AccessPointInfo> capturedAps;
     std::vector<VpnConnectionInfo> capturedVpns;
+    std::vector<CellularConnectionInfo> capturedCellular;
     std::vector<std::string> capturedSaved;
     std::vector<std::string> capturedWired;
     int pendingOps = 0;
@@ -137,6 +140,17 @@ namespace {
     int pending = 0;
   };
 
+  struct CellularRefreshState {
+    std::vector<CellularConnectionInfo> connections;
+    std::set<std::string> profilePaths;
+    int pending = 0;
+  };
+
+  struct ActiveCellularState {
+    std::set<std::string> activeProfilePaths;
+    int pending = 0;
+  };
+
 } // namespace
 
 struct NetworkManagerService::PendingAccessPointActivation {
@@ -181,6 +195,7 @@ NetworkManagerService::NetworkManagerService(SystemBus& bus) : m_bus(bus) {
         if (changedProperties.contains("PrimaryConnection")
             || changedProperties.contains("ActiveConnections")
             || changedProperties.contains("WirelessEnabled")
+            || changedProperties.contains("WwanEnabled")
             || changedProperties.contains("State")
             || changedProperties.contains("Connectivity")) {
           requestRebind();
@@ -221,9 +236,10 @@ void NetworkManagerService::refresh() {
   auto pending = std::make_shared<PendingRefresh>();
   pending->capturedAps = m_accessPoints;
   pending->capturedVpns = m_vpnConnections;
+  pending->capturedCellular = m_cellularConnections;
   pending->capturedSaved = m_savedSsids;
   pending->capturedWired = m_savedWiredConnectionPaths;
-  pending->pendingOps = 3;
+  pending->pendingOps = 4;
 
   pending->onAllComplete = [this, pending, lifetimeToken]() {
     if (lifetimeToken.expired()) {
@@ -235,6 +251,7 @@ void NetworkManagerService::refresh() {
       }
       const bool apsChanged = pending->capturedAps != m_accessPoints;
       const bool vpnsChanged = pending->capturedVpns != m_vpnConnections;
+      const bool cellularChanged = pending->capturedCellular != m_cellularConnections;
       const bool savedChanged = pending->capturedSaved != m_savedSsids;
       const bool wiredChanged = pending->capturedWired != m_savedWiredConnectionPaths;
       const bool stateChanged = next != m_state;
@@ -249,7 +266,8 @@ void NetworkManagerService::refresh() {
       m_emitOnNextRefresh = false;
       m_state = std::move(next);
       m_hasStateSnapshot = true;
-      if ((firstSnapshot || stateChanged || apsChanged || vpnsChanged || savedChanged || wiredChanged || forceEmit)
+       if ((firstSnapshot || stateChanged || apsChanged || vpnsChanged || cellularChanged || savedChanged || wiredChanged
+         || forceEmit)
           && m_changeCallback) {
         m_changeCallback(m_state, origin);
       }
@@ -277,6 +295,7 @@ void NetworkManagerService::refresh() {
 
   refreshAccessPoints(onOpComplete);
   refreshVpnConnections(onOpComplete);
+  refreshCellularConnections(onOpComplete);
   refreshSavedConnections(onOpComplete);
 }
 
@@ -617,16 +636,16 @@ bool NetworkManagerService::activateVpnConnection(const VpnConnectionInfo& vpn) 
             return;
           }
           if (err.has_value()) {
-            kLog.warn("ActivateConnection(vpn) failed name={} path={}: {}", vpnName, vpnPath, err->what());
+            kLog.warn("ActivateConnection(profile) failed name={} path={}: {}", vpnName, vpnPath, err->what());
           } else {
-            kLog.info("activating vpn name={} active={}", vpnName, std::string(activePath));
+            kLog.info("activating profile name={} active={}", vpnName, std::string(activePath));
           }
           m_emitOnNextRefresh = true;
           refresh();
         });
     return true;
   } catch (const sdbus::Error& e) {
-    kLog.warn("ActivateConnection(vpn) failed name={} path={} err={}", vpn.name, vpn.path, e.what());
+    kLog.warn("ActivateConnection(profile) failed name={} path={} err={}", vpn.name, vpn.path, e.what());
     return false;
   }
 }
@@ -655,7 +674,7 @@ bool NetworkManagerService::deactivateVpnConnection(const VpnConnectionInfo& vpn
             }
           }
           if (activePaths.empty()) {
-            kLog.debug("DeactivateConnection(vpn): no active connections name={}", vpnName);
+            kLog.debug("DeactivateConnection(profile): no active connections name={}", vpnName);
             m_emitOnNextRefresh = true;
             refresh();
             return;
@@ -669,7 +688,7 @@ bool NetworkManagerService::deactivateVpnConnection(const VpnConnectionInfo& vpn
               return;
             }
             if (--lookup->pending == 0 && !lookup->dispatched) {
-              kLog.debug("DeactivateConnection(vpn): no matching active connection name={}", vpnName);
+              kLog.debug("DeactivateConnection(profile): no matching active connection name={}", vpnName);
               m_emitOnNextRefresh = true;
               refresh();
             }
@@ -722,18 +741,18 @@ bool NetworkManagerService::deactivateVpnConnection(const VpnConnectionInfo& vpn
                                     }
                                     if (deactivateErr.has_value()) {
                                       kLog.warn(
-                                          "DeactivateConnection(vpn) failed name={} active={}: {}", vpnName,
+                                          "DeactivateConnection(profile) failed name={} active={}: {}", vpnName,
                                           activePathStr, deactivateErr->what()
                                       );
                                     } else {
-                                      kLog.info("deactivated vpn name={} active={}", vpnName, activePathStr);
+                                      kLog.info("deactivated profile name={} active={}", vpnName, activePathStr);
                                     }
                                     m_emitOnNextRefresh = true;
                                     refresh();
                                   });
                             } catch (const sdbus::Error& e) {
                               kLog.warn(
-                                  "DeactivateConnection(vpn) dispatch failed name={} active={}: {}", vpnName,
+                                  "DeactivateConnection(profile) dispatch failed name={} active={}: {}", vpnName,
                                   activePathStr, e.what()
                               );
                             }
@@ -749,9 +768,25 @@ bool NetworkManagerService::deactivateVpnConnection(const VpnConnectionInfo& vpn
         });
     return true;
   } catch (const sdbus::Error& e) {
-    kLog.warn("DeactivateConnection(vpn) lookup dispatch failed path={}: {}", vpn.path, e.what());
+    kLog.warn("DeactivateConnection(profile) lookup dispatch failed path={}: {}", vpn.path, e.what());
     return false;
   }
+}
+
+bool NetworkManagerService::activateCellularConnection(const CellularConnectionInfo& cellular) {
+  return activateVpnConnection(VpnConnectionInfo{
+      .path = cellular.path,
+      .name = cellular.name,
+      .active = cellular.active,
+  });
+}
+
+bool NetworkManagerService::deactivateCellularConnection(const CellularConnectionInfo& cellular) {
+  return deactivateVpnConnection(VpnConnectionInfo{
+      .path = cellular.path,
+      .name = cellular.name,
+      .active = cellular.active,
+  });
 }
 
 bool NetworkManagerService::canActivateWiredConnection() const noexcept { return !m_savedWiredConnectionPaths.empty(); }
@@ -855,6 +890,37 @@ void NetworkManagerService::setWirelessEnabled(bool enabled, WirelessEnabledComp
       m_pendingLocalWirelessEnabled.reset();
     }
     kLog.warn("WirelessEnabled write dispatch failed: {}", e.what());
+    if (onComplete) {
+      onComplete(false);
+    }
+  }
+}
+
+void NetworkManagerService::setCellularEnabled(bool enabled, WirelessEnabledCompletion onComplete) {
+  const std::weak_ptr<int> lifetimeToken = m_lifetimeToken;
+  try {
+    m_nm->setPropertyAsync("WwanEnabled")
+        .onInterface(kNmInterface)
+        .toValue(enabled)
+        .uponReplyInvoke([this, lifetimeToken, onComplete](std::optional<sdbus::Error> err) {
+          if (lifetimeToken.expired()) {
+            return;
+          }
+          if (err.has_value()) {
+            kLog.warn("WwanEnabled write failed: {}", err->what());
+            if (onComplete) {
+              onComplete(false);
+            }
+            return;
+          }
+          m_emitOnNextRefresh = true;
+          requestRebind();
+          if (onComplete) {
+            onComplete(true);
+          }
+        });
+  } catch (const sdbus::Error& e) {
+    kLog.warn("WwanEnabled write dispatch failed: {}", e.what());
     if (onComplete) {
       onComplete(false);
     }
@@ -1421,6 +1487,183 @@ void NetworkManagerService::refreshVpnConnections(std::function<void()> onComple
   }
 }
 
+void NetworkManagerService::refreshCellularConnections(std::function<void()> onComplete) {
+  const std::weak_ptr<int> lifetimeToken = m_lifetimeToken;
+  try {
+    auto settings =
+        std::shared_ptr<sdbus::IProxy>(sdbus::createProxy(m_bus.connection(), kNmBusName, kNmSettingsObjectPath));
+    settings->callMethodAsync("ListConnections")
+        .onInterface(kNmSettingsInterface)
+        .uponReplyInvoke([this, lifetimeToken, settings,
+                          onComplete](std::optional<sdbus::Error> err, std::vector<sdbus::ObjectPath> connectionPaths) {
+          if (lifetimeToken.expired()) {
+            return;
+          }
+          if (err.has_value()) {
+            kLog.debug("refreshCellularConnections ListConnections failed: {}", err->what());
+            onComplete();
+            return;
+          }
+          if (connectionPaths.empty()) {
+            m_cellularConnections.clear();
+            onComplete();
+            return;
+          }
+
+          auto cellularState = std::make_shared<CellularRefreshState>();
+          cellularState->pending = static_cast<int>(connectionPaths.size());
+
+          auto finalize = [this, lifetimeToken, cellularState, onComplete]() {
+            if (lifetimeToken.expired()) {
+              return;
+            }
+            std::ranges::sort(
+                cellularState->connections, [](const CellularConnectionInfo& a, const CellularConnectionInfo& b) {
+                  if (a.active != b.active) {
+                    return a.active;
+                  }
+                  return a.name < b.name;
+                }
+            );
+              kLog.debug("refreshed {} cellular connection profile(s)", cellularState->connections.size());
+            m_cellularConnections = std::move(cellularState->connections);
+            onComplete();
+          };
+
+          auto markActiveAndFinalize = [this, lifetimeToken, cellularState, finalize]() {
+            if (lifetimeToken.expired()) {
+              return;
+            }
+            m_nm->callMethodAsync("Get")
+                .onInterface(kPropertiesInterface)
+                .withArguments(kNmInterface, "ActiveConnections")
+                .uponReplyInvoke([this, lifetimeToken, cellularState,
+                                  finalize](std::optional<sdbus::Error> activeErr, sdbus::Variant activeValue) {
+                  if (lifetimeToken.expired()) {
+                    return;
+                  }
+                  std::vector<sdbus::ObjectPath> activePaths;
+                  if (!activeErr.has_value()) {
+                    try {
+                      activePaths = activeValue.get<std::vector<sdbus::ObjectPath>>();
+                    } catch (const sdbus::Error&) {
+                    }
+                  }
+                  if (activePaths.empty()) {
+                    finalize();
+                    return;
+                  }
+
+                  auto activeState = std::make_shared<ActiveCellularState>();
+                  activeState->pending = static_cast<int>(activePaths.size());
+                  auto onActiveComplete = [lifetimeToken, cellularState, activeState, finalize]() {
+                    if (lifetimeToken.expired()) {
+                      return;
+                    }
+                    if (--activeState->pending == 0) {
+                      for (auto& connection : cellularState->connections) {
+                        connection.active = activeState->activeProfilePaths.contains(connection.path);
+                      }
+                      finalize();
+                    }
+                  };
+
+                  for (const auto& activePath : activePaths) {
+                    try {
+                      auto active = std::shared_ptr<sdbus::IProxy>(
+                          sdbus::createProxy(m_bus.connection(), kNmBusName, activePath)
+                      );
+                      active->callMethodAsync("GetAll")
+                          .onInterface(kPropertiesInterface)
+                          .withArguments(kNmActiveConnectionInterface)
+                          .uponReplyInvoke([lifetimeToken, active, cellularState, activeState, onActiveComplete](
+                                               std::optional<sdbus::Error> getAllErr,
+                                               std::map<std::string, sdbus::Variant> properties
+                                           ) {
+                            if (lifetimeToken.expired()) {
+                              return;
+                            }
+                            if (!getAllErr.has_value()) {
+                              std::string profilePath;
+                              std::uint32_t state = 0U;
+                              if (auto it = properties.find("Connection"); it != properties.end()) {
+                                try {
+                                  profilePath = it->second.get<sdbus::ObjectPath>();
+                                } catch (const sdbus::Error&) {
+                                }
+                              }
+                              if (auto it = properties.find("State"); it != properties.end()) {
+                                try {
+                                  state = it->second.get<std::uint32_t>();
+                                } catch (const sdbus::Error&) {
+                                }
+                              }
+                              if (cellularState->profilePaths.contains(profilePath)
+                                  && (state == kNmActiveConnectionStateActivating
+                                      || state == kNmActiveConnectionStateActivated)) {
+                                activeState->activeProfilePaths.insert(profilePath);
+                              }
+                            }
+                            onActiveComplete();
+                          });
+                    } catch (const sdbus::Error&) {
+                      onActiveComplete();
+                    }
+                  }
+                });
+          };
+
+          for (const auto& connectionPath : connectionPaths) {
+            try {
+              auto connection =
+                  std::shared_ptr<sdbus::IProxy>(sdbus::createProxy(m_bus.connection(), kNmBusName, connectionPath));
+              connection->callMethodAsync("GetSettings")
+                  .onInterface(kNmSettingsConnectionInterface)
+                  .uponReplyInvoke([lifetimeToken, connection, cellularState, connectionPath, markActiveAndFinalize](
+                                       std::optional<sdbus::Error> getErr, ConnectionSettings cfg
+                                   ) {
+                    if (lifetimeToken.expired()) {
+                      return;
+                    }
+                    if (!getErr.has_value()) {
+                      auto connIt = cfg.find("connection");
+                      if (connIt != cfg.end()) {
+                        auto typeIt = connIt->second.find("type");
+                        try {
+                          if (typeIt != connIt->second.end()
+                              && typeIt->second.get<std::string>() == kNmCellularConnectionType) {
+                            CellularConnectionInfo info;
+                            info.path = std::string(connectionPath);
+                            if (auto idIt = connIt->second.find("id"); idIt != connIt->second.end()) {
+                              info.name = idIt->second.get<std::string>();
+                            }
+                            if (info.name.empty()) {
+                              info.name = info.path;
+                            }
+                            cellularState->profilePaths.insert(info.path);
+                            cellularState->connections.push_back(std::move(info));
+                          }
+                        } catch (const sdbus::Error&) {
+                        }
+                      }
+                    }
+                    if (--cellularState->pending == 0) {
+                      markActiveAndFinalize();
+                    }
+                  });
+            } catch (const sdbus::Error&) {
+              if (--cellularState->pending == 0) {
+                markActiveAndFinalize();
+              }
+            }
+          }
+        });
+  } catch (const sdbus::Error& e) {
+    kLog.debug("refreshCellularConnections: {}", e.what());
+    onComplete();
+  }
+}
+
 void NetworkManagerService::reconcileVpnActiveWatchers(const std::set<std::string>& activePaths) {
   // VPN state transitions (Activating -> Activated, teardown) don't always move
   // PrimaryConnection, so watch each VPN active connection directly and refresh
@@ -1939,7 +2182,8 @@ void NetworkManagerService::resolvePhysicalPrimary(
                         } catch (const sdbus::Error&) {
                         }
                       }
-                      const bool physical = deviceType == kNmDeviceTypeEthernet || deviceType == kNmDeviceTypeWifi;
+                        const bool physical = deviceType == kNmDeviceTypeEthernet || deviceType == kNmDeviceTypeWifi
+                          || deviceType == kNmDeviceTypeModem;
                       if (physical && !activePath.empty() && activePath != "/") {
                         // Prefer activated over activating, ethernet over wifi.
                         // An activated device only counts as the connected primary
@@ -1953,6 +2197,8 @@ void NetworkManagerService::resolvePhysicalPrimary(
                           score = 2;
                         }
                         if (score > 0 && deviceType == kNmDeviceTypeEthernet) {
+                          score += 2;
+                        } else if (score > 0 && deviceType == kNmDeviceTypeWifi) {
                           ++score;
                         }
                         if (score > scan->score) {
@@ -2250,6 +2496,8 @@ void NetworkManagerService::readStateAsync(std::function<void(NetworkState)> onC
 
               if (deviceType == kNmDeviceTypeWifi) {
                 next->kind = NetworkConnectivity::Wireless;
+              } else if (deviceType == kNmDeviceTypeModem) {
+                next->kind = NetworkConnectivity::Cellular;
               } else if (
                   deviceType == kNmDeviceTypeEthernet
                   || deviceType == kNmDeviceTypeBridge
@@ -2326,6 +2574,7 @@ void NetworkManagerService::readStateAsync(std::function<void(NetworkState)> onC
                             }
                           }
                         }
+
                       }
                       finishAfterIp4();
                     });
@@ -2366,6 +2615,12 @@ void NetworkManagerService::readStateAsync(std::function<void(NetworkState)> onC
             }
             if (!connErr.has_value()) {
               std::string type;
+              if (auto idIt = connectionProperties.find("Id"); idIt != connectionProperties.end()) {
+                try {
+                  next->connectionName = idIt->second.get<std::string>();
+                } catch (const sdbus::Error&) {
+                }
+              }
               if (auto typeIt = connectionProperties.find("Type"); typeIt != connectionProperties.end()) {
                 try {
                   type = typeIt->second.get<std::string>();
@@ -2408,6 +2663,13 @@ void NetworkManagerService::readStateAsync(std::function<void(NetworkState)> onC
                 wirelessEnabledIt != nmProperties.end()) {
               try {
                 next->wirelessEnabled = wirelessEnabledIt->second.get<bool>();
+              } catch (const sdbus::Error&) {
+              }
+            }
+            if (auto cellularEnabledIt = nmProperties.find("WwanEnabled");
+                cellularEnabledIt != nmProperties.end()) {
+              try {
+                next->cellularEnabled = cellularEnabledIt->second.get<bool>();
               } catch (const sdbus::Error&) {
               }
             }

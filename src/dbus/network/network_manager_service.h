@@ -38,6 +38,9 @@ public:
   [[nodiscard]] const std::vector<VpnConnectionInfo>& vpnConnections() const noexcept override {
     return m_vpnConnections;
   }
+  [[nodiscard]] const std::vector<CellularConnectionInfo>& cellularConnections() const noexcept override {
+    return m_cellularConnections;
+  }
 
   // Trigger a Wi-Fi scan on every wifi device. Results arrive via PropertiesChanged.
   void requestScan() override;
@@ -53,11 +56,14 @@ public:
   // aborts a connection that is stuck activating.
   bool activateVpnConnection(const VpnConnectionInfo& vpn) override;
   bool deactivateVpnConnection(const VpnConnectionInfo& vpn) override;
+  bool activateCellularConnection(const CellularConnectionInfo& cellular) override;
+  bool deactivateCellularConnection(const CellularConnectionInfo& cellular) override;
   [[nodiscard]] bool canActivateWiredConnection() const noexcept override;
   bool activateWiredConnection() override;
 
   // Enable / disable the Wi-Fi radio.
   void setWirelessEnabled(bool enabled, WirelessEnabledCompletion onComplete = {}) override;
+  void setCellularEnabled(bool enabled, WirelessEnabledCompletion onComplete = {}) override;
 
   // Disconnect the active physical connection.
   void disconnect() override;
@@ -73,6 +79,7 @@ private:
   void refreshAccessPoints(std::function<void()> onComplete);
   void refreshSavedConnections(std::function<void()> onComplete);
   void refreshVpnConnections(std::function<void()> onComplete);
+  void refreshCellularConnections(std::function<void()> onComplete);
   void reconcileVpnActiveWatchers(const std::set<std::string>& activePaths);
   void finishSavedConnections(
       std::vector<std::string>& ssids, std::vector<std::string>& wiredConnectionPaths, std::function<void()> onComplete
@@ -122,6 +129,7 @@ private:
   NetworkState m_state;
   std::vector<AccessPointInfo> m_accessPoints;
   std::vector<VpnConnectionInfo> m_vpnConnections;
+  std::vector<CellularConnectionInfo> m_cellularConnections;
   std::vector<std::string> m_savedSsids;
   std::vector<std::string> m_savedWiredConnectionPaths;
   std::unordered_map<std::string, std::unique_ptr<PendingAccessPointActivation>> m_pendingApActivations;
