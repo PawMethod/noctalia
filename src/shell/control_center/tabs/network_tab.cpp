@@ -1351,14 +1351,13 @@ void NetworkTab::rebuildApList(Renderer& renderer) {
 
       wifiCard->addChild(buildApRows());
 
-      m_list->addChild(std::move(wifiCard));
-
-      if (cellularCardForList != nullptr) {
-        m_list->addChild(std::move(cellularCardForList));
-      }
       if (vpnCardForList != nullptr) {
         m_list->addChild(std::move(vpnCardForList));
       }
+      if (cellularCardForList != nullptr) {
+        m_list->addChild(std::move(cellularCardForList));
+      }
+      m_list->addChild(std::move(wifiCard));
 
       // Live state (spinner visibility/animation, toggle checked) is owned by
       // syncCurrentCard(), which runs every frame after the card is attached.
