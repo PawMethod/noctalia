@@ -580,15 +580,17 @@ std::unique_ptr<Flex> NetworkTab::create() {
                 }
               },
       }),
-            ui::spinner({
-              .out = &m_passwordSubmitSpinner,
-              .color = colorSpecFromRole(ColorRole::Primary),
-              .spinnerSize = Style::baseGlyphSize * scale,
-              .spinning = false,
-              .visible = false,
-            }),
+      ui::spinner({
+          .out = &m_passwordSubmitSpinner,
+          .color = colorSpecFromRole(ColorRole::Primary),
+          .spinnerSize = Style::baseGlyphSize * scale,
+          .spinning = false,
+          .width = Style::baseGlyphSize * scale,
+          .height = Style::baseGlyphSize * scale,
+          .opacity = 0.0F,
+      }),
       ui::button({
-              .out = &m_passwordSubmitButton,
+          .out = &m_passwordSubmitButton,
           .text = i18n::tr("control-center.network.connect"),
           .variant = ButtonVariant::Default,
           .onClick =
@@ -710,17 +712,13 @@ void NetworkTab::syncPasswordCard() {
   }
   m_passwordCard->setVisible(m_hasPendingSecret);
   if (m_passwordSubmitButton != nullptr) {
-    const std::string submitText = m_secretSubmitting
-        ? i18n::tr("widgets.network.connecting") + "..."
-        : i18n::tr("control-center.network.connect");
-    m_passwordSubmitButton->setText(submitText);
     m_passwordSubmitButton->setEnabled(!m_secretSubmitting);
   }
   if (m_passwordRevealButton != nullptr) {
     m_passwordRevealButton->setEnabled(!m_secretSubmitting);
   }
   if (m_passwordSubmitSpinner != nullptr) {
-    m_passwordSubmitSpinner->setVisible(m_secretSubmitting);
+    m_passwordSubmitSpinner->setOpacity(m_secretSubmitting ? 1.0F : 0.0F);
     if (m_secretSubmitting && !m_passwordSubmitSpinner->spinning()) {
       m_passwordSubmitSpinner->start();
     } else if (!m_secretSubmitting && m_passwordSubmitSpinner->spinning()) {
