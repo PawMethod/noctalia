@@ -75,6 +75,8 @@ private:
   Label* m_passwordTitle = nullptr;
   Input* m_passwordInput = nullptr;
   Button* m_passwordRevealButton = nullptr;
+  Button* m_passwordSubmitButton = nullptr;
+  Spinner* m_passwordSubmitSpinner = nullptr;
   bool m_passwordRevealed = false;
   ScrollView* m_listScroll = nullptr;
   Flex* m_list = nullptr;
