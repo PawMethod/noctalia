@@ -1116,13 +1116,11 @@ void NetworkTab::rebuildApList(Renderer& renderer) {
               if (m_network != nullptr) {
                 m_network->activateCellularConnection(connection);
               }
-              PanelManager::instance().refresh();
             },
             [this, connection]() {
               if (m_network != nullptr) {
                 m_network->deactivateCellularConnection(connection);
               }
-              PanelManager::instance().refresh();
             }
         );
         cellularCard->addChild(std::move(row));
