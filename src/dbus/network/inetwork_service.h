@@ -34,6 +34,7 @@ public:
   virtual bool deactivateVpnConnection(const VpnConnectionInfo& vpn) = 0;
   virtual bool activateCellularConnection(const CellularConnectionInfo& cellular) = 0;
   virtual bool deactivateCellularConnection(const CellularConnectionInfo& cellular) = 0;
+  virtual bool addCellularConnection(const std::string& /*name*/, const std::string& /*apn*/) { return false; }
   virtual bool forgetCellularConnection(const CellularConnectionInfo& /*cellular*/) { return false; }
   [[nodiscard]] virtual bool canActivateWiredConnection() const noexcept { return false; }
   virtual bool activateWiredConnection() { return false; }
@@ -43,5 +44,6 @@ public:
   virtual void forgetSsid(const std::string& ssid) = 0;
   [[nodiscard]] virtual bool hasSavedConnection(const std::string& ssid) const = 0;
   [[nodiscard]] virtual bool supportsSecretAgent() const noexcept { return false; }
+  [[nodiscard]] virtual bool supportsCellular() const noexcept { return false; }
   void registerIpc(IpcService& ipc, WirelessFeedbackCallback wirelessFeedback = {});
 };

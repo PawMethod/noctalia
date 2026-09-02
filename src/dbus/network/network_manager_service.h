@@ -58,6 +58,7 @@ public:
   bool deactivateVpnConnection(const VpnConnectionInfo& vpn) override;
   bool activateCellularConnection(const CellularConnectionInfo& cellular) override;
   bool deactivateCellularConnection(const CellularConnectionInfo& cellular) override;
+  bool addCellularConnection(const std::string& name, const std::string& apn) override;
   bool forgetCellularConnection(const CellularConnectionInfo& cellular) override;
   [[nodiscard]] bool canActivateWiredConnection() const noexcept override;
   bool activateWiredConnection() override;
@@ -75,6 +76,7 @@ public:
   // Whether any saved connection matches the SSID (uses cached snapshot refreshed on every refresh()).
   [[nodiscard]] bool hasSavedConnection(const std::string& ssid) const override;
   [[nodiscard]] bool supportsSecretAgent() const noexcept override { return true; }
+  [[nodiscard]] bool supportsCellular() const noexcept override { return m_state.cellularAvailable; }
 
 private:
   void refreshAccessPoints(std::function<void()> onComplete);

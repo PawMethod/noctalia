@@ -46,6 +46,7 @@ struct NetworkState {
   bool resolving = false; // active connection is activating, not yet connected
   bool wirelessEnabled = false;
   bool cellularEnabled = false;
+  bool cellularAvailable = false;
   bool scanning = false;
   bool vpnActive = false;          // a VPN connection is active or activating
   bool vpnConnected = false;       // a VPN tunnel is fully activated (routes applied)

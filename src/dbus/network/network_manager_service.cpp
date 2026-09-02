@@ -794,6 +794,58 @@ bool NetworkManagerService::deactivateCellularConnection(const CellularConnectio
   });
 }
 
+bool NetworkManagerService::addCellularConnection(const std::string& name, const std::string& apn) {
+  if (name.empty() || apn.empty()) {
+    return false;
+  }
+
+  ConnectionSettings settings;
+  settings["connection"]["id"] = sdbus::Variant{name};
+  settings["connection"]["type"] = sdbus::Variant{std::string(kNmCellularConnectionType)};
+  settings["connection"]["autoconnect"] = sdbus::Variant{true};
+  settings["gsm"]["apn"] = sdbus::Variant{apn};
+  settings["gsm"]["auto-config"] = sdbus::Variant{false};
+  settings["gsm"]["home-only"] = sdbus::Variant{false};
+  settings["gsm"]["pin-flags"] = sdbus::Variant{std::uint32_t{2}};
+  settings["ipv4"]["method"] = sdbus::Variant{std::string("auto")};
+  settings["ipv6"]["method"] = sdbus::Variant{std::string("auto")};
+
+  const std::weak_ptr<int> lifetimeToken = m_lifetimeToken;
+  try {
+    auto settingsProxy = std::shared_ptr<sdbus::IProxy>(
+        sdbus::createProxy(m_bus.connection(), kNmBusName, kNmSettingsObjectPath)
+    );
+    settingsProxy->callMethodAsync("AddConnection")
+        .onInterface(kNmSettingsInterface)
+        .withArguments(settings)
+        .uponReplyInvoke([this, lifetimeToken, settingsProxy, name](
+                             std::optional<sdbus::Error> err, sdbus::ObjectPath connectionPath
+                         ) {
+          if (lifetimeToken.expired()) {
+            return;
+          }
+          if (err.has_value()) {
+            kLog.warn("add cellular profile failed name={}: {}", name, err->what());
+            refresh();
+            return;
+          }
+          kLog.info("added cellular profile name={} path={}", name, std::string(connectionPath));
+          if (m_state.cellularEnabled) {
+            activateCellularConnection(CellularConnectionInfo{
+                .path = std::string(connectionPath),
+                .name = name,
+            });
+          } else {
+            refresh();
+          }
+        });
+    return true;
+  } catch (const sdbus::Error& e) {
+    kLog.warn("add cellular profile dispatch failed name={}: {}", name, e.what());
+    return false;
+  }
+}
+
 bool NetworkManagerService::forgetCellularConnection(const CellularConnectionInfo& cellular) {
   if (cellular.path.empty() || cellular.active) {
     return false;
@@ -2910,6 +2962,13 @@ void NetworkManagerService::readStateAsync(std::function<void(NetworkState)> onC
                 cellularEnabledIt != nmProperties.end()) {
               try {
                 next->cellularEnabled = cellularEnabledIt->second.get<bool>();
+              } catch (const sdbus::Error&) {
+              }
+            }
+            if (auto cellularAvailableIt = nmProperties.find("WwanHardwareEnabled");
+                cellularAvailableIt != nmProperties.end()) {
+              try {
+                next->cellularAvailable = cellularAvailableIt->second.get<bool>();
               } catch (const sdbus::Error&) {
               }
             }

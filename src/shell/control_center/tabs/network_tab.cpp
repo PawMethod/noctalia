@@ -669,6 +669,8 @@ void NetworkTab::onClose() {
   m_rescanButton = nullptr;
   m_wifiToggle = nullptr;
   m_cellularToggle = nullptr;
+  m_cellularNameInput = nullptr;
+  m_cellularApnInput = nullptr;
   m_scanSpinner = nullptr;
   m_currentRow = nullptr;
   m_disconnectButton = nullptr;
@@ -687,6 +689,9 @@ void NetworkTab::onClose() {
   m_cellularToggleWriteComplete = false;
   m_cellularToggleTargetObserved = false;
   ++m_cellularToggleRequestGeneration;
+  m_cellularSetupVisible = false;
+  m_cellularSetupName.clear();
+  m_cellularSetupApn.clear();
 }
 
 void NetworkTab::syncPasswordCard() {
@@ -1011,6 +1016,8 @@ NetworkTab::structureKey(
   key += wirelessEnabled ? '1' : '0';
   key += "\nscan:";
   key += scanning ? '1' : '0';
+  key += "\ncellular-setup:";
+  key += m_cellularSetupVisible ? '1' : '0';
   return key;
 }
 
@@ -1125,6 +1132,9 @@ void NetworkTab::rebuildApList(Renderer& renderer) {
   };
 
   m_wifiToggle = nullptr;
+  m_cellularToggle = nullptr;
+  m_cellularNameInput = nullptr;
+  m_cellularApnInput = nullptr;
   m_scanSpinner = nullptr;
   m_rescanButton = nullptr;
   m_apRows.clear();
@@ -1144,12 +1154,33 @@ void NetworkTab::rebuildApList(Renderer& renderer) {
   } else {
     const float opacity = panelCardOpacity();
 
-    if (!cellular.empty() || m_network->state().cellularEnabled) {
+    if (m_network->supportsCellular()) {
       auto cellularCard = ui::column({
           .configure = [scale, opacity](Flex& card) { applySectionCardStyle(card, scale, opacity); },
       });
-        auto cellularHeader = makeCardHeaderRow(i18n::tr("control-center.network.cellular"), scale);
-        cellularHeader->addChild(
+      auto cellularHeader = makeCardHeaderRow(i18n::tr("control-center.network.cellular"), scale);
+      cellularHeader->addChild(
+            ui::button({
+                .glyph = m_cellularSetupVisible ? "x" : "plus",
+                .glyphSize = Style::baseGlyphSize * scale,
+                .variant = ButtonVariant::Ghost,
+                .tooltip = i18n::tr(
+                    m_cellularSetupVisible ? "common.actions.cancel" : "control-center.network.add-cellular"
+                ),
+                .padding = Style::spaceXs * scale,
+                .radius = Style::scaledRadiusSm(scale),
+                .onClick = [this]() {
+                  if (m_cellularSetupVisible) {
+                    closeCellularSetup();
+                  } else {
+                    m_cellularSetupVisible = true;
+                    m_lastStructureKey.clear();
+                    PanelManager::instance().refresh();
+                  }
+                },
+            })
+        );
+      cellularHeader->addChild(
           ui::toggle({
             .out = &m_cellularToggle,
             .checkedImmediate = m_network->state().cellularEnabled,
@@ -1158,7 +1189,50 @@ void NetworkTab::rebuildApList(Renderer& renderer) {
             .onChange = [this](bool checked) { requestCellularEnabled(checked); },
           })
         );
-        cellularCard->addChild(std::move(cellularHeader));
+      cellularCard->addChild(std::move(cellularHeader));
+
+      if (m_cellularSetupVisible) {
+        auto setup = ui::column({
+            .align = FlexAlign::Stretch,
+            .gap = Style::spaceSm * scale,
+        });
+        setup->addChild(
+            ui::input({
+                .out = &m_cellularNameInput,
+                .value = m_cellularSetupName,
+                .placeholder = i18n::tr("control-center.network.connection-name"),
+                .surfaceOpacity = opacity,
+                .onChange = [this](const std::string& value) { m_cellularSetupName = value; },
+                .onSubmit = [this](const std::string& /*value*/) { submitCellularSetup(); },
+            })
+        );
+        setup->addChild(
+            ui::input({
+                .out = &m_cellularApnInput,
+                .value = m_cellularSetupApn,
+                .placeholder = i18n::tr("control-center.network.apn"),
+                .surfaceOpacity = opacity,
+                .onChange = [this](const std::string& value) { m_cellularSetupApn = value; },
+                .onSubmit = [this](const std::string& /*value*/) { submitCellularSetup(); },
+            })
+        );
+        setup->addChild(
+            ui::row(
+                {.align = FlexAlign::Center, .gap = Style::spaceSm * scale},
+                ui::button({
+                    .text = i18n::tr("control-center.network.add-cellular"),
+                    .variant = ButtonVariant::Default,
+                    .onClick = [this]() { submitCellularSetup(); },
+                }),
+                ui::button({
+                    .text = i18n::tr("common.actions.cancel"),
+                    .variant = ButtonVariant::Ghost,
+                    .onClick = [this]() { closeCellularSetup(); },
+                })
+            )
+        );
+        cellularCard->addChild(std::move(setup));
+      }
 
       for (const auto& connection : cellular) {
         auto row = std::make_unique<ConnectionProfileRow>(
@@ -1299,8 +1373,39 @@ bool NetworkTab::syncApRows() {
   return changed;
 }
 
+void NetworkTab::submitCellularSetup() {
+  const bool nameValid = !m_cellularSetupName.empty();
+  const bool apnValid = !m_cellularSetupApn.empty();
+  if (m_cellularNameInput != nullptr) {
+    m_cellularNameInput->setInvalid(!nameValid);
+  }
+  if (m_cellularApnInput != nullptr) {
+    m_cellularApnInput->setInvalid(!apnValid);
+  }
+  if (!nameValid || !apnValid || m_network == nullptr) {
+    return;
+  }
+  if (m_network->addCellularConnection(m_cellularSetupName, m_cellularSetupApn)) {
+    closeCellularSetup();
+  }
+}
+
+void NetworkTab::closeCellularSetup() {
+  m_cellularSetupVisible = false;
+  m_cellularSetupName.clear();
+  m_cellularSetupApn.clear();
+  m_lastStructureKey.clear();
+  PanelManager::instance().refresh();
+}
+
 void NetworkTab::onPanelCardOpacityChanged(float opacity) {
   if (m_passwordInput != nullptr) {
     m_passwordInput->setSurfaceOpacity(opacity);
+  }
+  if (m_cellularNameInput != nullptr) {
+    m_cellularNameInput->setSurfaceOpacity(opacity);
+  }
+  if (m_cellularApnInput != nullptr) {
+    m_cellularApnInput->setSurfaceOpacity(opacity);
   }
 }

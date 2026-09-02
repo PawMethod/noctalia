@@ -270,9 +270,12 @@
       "start-playback": "Start playback in an MPRIS app"
     },
     "network": {
+      "add-cellular": "Add mobile connection",
+      "apn": "Access point name (APN)",
       "available": "Available",
       "cellular": "Mobile broadband",
       "connect": "Connect",
+      "connection-name": "Connection name",
       "current-connection": "Current Connection",
       "external-ip": "WAN {ip}",
       "no-networks": "No networks in range",

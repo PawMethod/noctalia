@@ -45,6 +45,8 @@ private:
   void handleWirelessEnabledCompletion(std::uint64_t generation, bool success);
   void requestCellularEnabled(bool enabled);
   void handleCellularEnabledCompletion(std::uint64_t generation, bool success);
+  void submitCellularSetup();
+  void closeCellularSetup();
   void rebuildApList(Renderer& renderer);
   // Pushes live signal values into the existing rows. Returns true if any changed.
   bool syncApRows();
@@ -79,10 +81,15 @@ private:
   Button* m_rescanButton = nullptr;
   Toggle* m_wifiToggle = nullptr;
   Toggle* m_cellularToggle = nullptr;
+  Input* m_cellularNameInput = nullptr;
+  Input* m_cellularApnInput = nullptr;
   Flex* m_currentRow = nullptr;
   Button* m_disconnectButton = nullptr;
   Spinner* m_scanSpinner = nullptr;
   bool m_vpnVisible = true;
+  bool m_cellularSetupVisible = false;
+  std::string m_cellularSetupName;
+  std::string m_cellularSetupApn;
 
   std::unordered_map<std::string, AccessPointRow*> m_apRows;
 
