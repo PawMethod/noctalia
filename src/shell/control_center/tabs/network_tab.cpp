@@ -438,7 +438,12 @@ NetworkTab::NetworkTab(INetworkService* network, NetworkSecretAgent* secrets, Ex
     m_secrets->setRequestCallback([this](const NetworkSecretAgent::SecretRequest& request) {
       showPasswordPrompt(request);
       if (request.kind == NetworkSecretAgent::SecretKind::SimPin) {
-        PanelManager::instance().openPanel("control-center", PanelOpenRequest{.context = "network"});
+        auto& panelManager = PanelManager::instance();
+        if (panelManager.isOpenPanel("control-center") && panelManager.isActivePanelContext("network")) {
+          panelManager.refresh();
+        } else {
+          panelManager.openPanel("control-center", PanelOpenRequest{.context = "network"});
+        }
       } else {
         PanelManager::instance().refresh();
       }
@@ -737,7 +742,10 @@ void NetworkTab::submitPasswordPrompt(const std::string& value) {
       m_network->activateAccessPoint(*m_pendingAccessPoint, value);
     }
   } else if (m_secrets != nullptr) {
+    clearPasswordPrompt();
     m_secrets->submitSecret(value);
+    PanelManager::instance().refresh();
+    return;
   }
   clearPasswordPrompt();
   PanelManager::instance().refresh();
