@@ -18,6 +18,7 @@ class AccessPointRow;
 class Button;
 class ExternalIpService;
 class Flex;
+class Glyph;
 class Input;
 class Label;
 class ScrollView;
@@ -51,6 +52,7 @@ private:
   void rebuildApList(Renderer& renderer);
   // Pushes live signal values into the existing rows. Returns true if any changed.
   bool syncApRows();
+  bool syncCellularRows();
   void syncPasswordCard();
   void showPasswordPrompt(const NetworkSecretAgent::SecretRequest& request);
   void showPasswordPrompt(const AccessPointInfo& ap);
@@ -95,6 +97,11 @@ private:
   std::string m_cellularSetupApn;
 
   std::unordered_map<std::string, AccessPointRow*> m_apRows;
+  struct CellularRowMetrics {
+    Glyph* glyph = nullptr;
+    Label* value = nullptr;
+  };
+  std::unordered_map<std::string, CellularRowMetrics> m_cellularRows;
 
   std::string m_lastStructureKey;
   float m_lastListWidth = -1.0F;

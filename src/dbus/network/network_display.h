@@ -9,6 +9,7 @@ namespace network_display {
   [[nodiscard]] const char* glyphForState(const NetworkState& state) noexcept;
   [[nodiscard]] const char* vpnGlyph() noexcept;
   [[nodiscard]] const char* cellularGlyphForState(const NetworkState& state) noexcept;
+  [[nodiscard]] const char* cellularGlyphForSignal(std::uint8_t signal) noexcept;
   [[nodiscard]] std::uint8_t cellularSignalPercentFromRsrp(double rsrpDbm) noexcept;
   [[nodiscard]] const char* cellularAccessTechnologyLabel(std::uint32_t technologies) noexcept;
   [[nodiscard]] const char* wifiGlyphForState(const NetworkState& state) noexcept;

@@ -154,6 +154,7 @@ namespace {
     std::set<std::string> activeProfilePaths;
     std::set<std::string> connectedProfilePaths;
     std::set<std::string> cellularActivePaths;
+    std::set<std::string> cellularDevicePaths;
     int pending = 0;
   };
 
@@ -1780,6 +1781,7 @@ void NetworkManagerService::refreshCellularConnections(std::function<void()> onC
           if (connectionPaths.empty()) {
             m_cellularConnections.clear();
             reconcileCellularActiveWatchers({});
+            bindCellularDevice({});
             onComplete();
             return;
           }
@@ -1825,6 +1827,7 @@ void NetworkManagerService::refreshCellularConnections(std::function<void()> onC
                   }
                   if (activePaths.empty()) {
                     reconcileCellularActiveWatchers({});
+                    bindCellularDevice({});
                     finalize();
                     return;
                   }
@@ -1841,6 +1844,10 @@ void NetworkManagerService::refreshCellularConnections(std::function<void()> onC
                         connection.connected = activeState->connectedProfilePaths.contains(connection.path);
                       }
                       reconcileCellularActiveWatchers(activeState->cellularActivePaths);
+                      bindCellularDevice(
+                          activeState->cellularDevicePaths.empty() ? std::string{}
+                                                                   : *activeState->cellularDevicePaths.begin()
+                      );
                       finalize();
                     }
                   };
@@ -1879,6 +1886,15 @@ void NetworkManagerService::refreshCellularConnections(std::function<void()> onC
                               }
                               if (cellularState->profilePaths.contains(profilePath)) {
                                 activeState->cellularActivePaths.insert(activePathStr);
+                                if (auto devicesIt = properties.find("Devices"); devicesIt != properties.end()) {
+                                  try {
+                                    const auto devices = devicesIt->second.get<std::vector<sdbus::ObjectPath>>();
+                                    for (const auto& devicePath : devices) {
+                                      activeState->cellularDevicePaths.emplace(devicePath);
+                                    }
+                                  } catch (const sdbus::Error&) {
+                                  }
+                                }
                                 if (state == kNmActiveConnectionStateActivating
                                     || state == kNmActiveConnectionStateActivated) {
                                   activeState->activeProfilePaths.insert(profilePath);
@@ -2587,7 +2603,9 @@ void NetworkManagerService::rebindActiveDevice(const std::string& devicePath) {
   m_activeDevicePath = normalized;
   m_activeDevice.reset();
   rebindActiveAccessPoint({});
-  bindModem({});
+  if (m_cellularDevicePath.empty()) {
+    bindModem({});
+  }
 
   if (normalized.empty()) {
     return;
@@ -2656,6 +2674,41 @@ void NetworkManagerService::rebindActiveDevice(const std::string& devicePath) {
   }
 }
 
+void NetworkManagerService::bindCellularDevice(const std::string& devicePath) {
+  const std::string normalized = (devicePath.empty() || devicePath == "/") ? std::string{} : devicePath;
+  if (normalized == m_cellularDevicePath && (normalized.empty() || m_modem != nullptr)) {
+    return;
+  }
+  m_cellularDevicePath = normalized;
+  if (normalized.empty()) {
+    bindModem({});
+    return;
+  }
+
+  const std::weak_ptr<int> lifetimeToken = m_lifetimeToken;
+  try {
+    auto device = std::shared_ptr<sdbus::IProxy>(
+        sdbus::createProxy(m_bus.connection(), kNmBusName, sdbus::ObjectPath{normalized})
+    );
+    device->callMethodAsync("Get")
+        .onInterface(kPropertiesInterface)
+        .withArguments(kNmDeviceInterface, "Udi")
+        .uponReplyInvoke([this, lifetimeToken, device, normalized](
+                             std::optional<sdbus::Error> err, sdbus::Variant value
+                         ) {
+          if (lifetimeToken.expired() || err.has_value() || m_cellularDevicePath != normalized) {
+            return;
+          }
+          try {
+            bindModem(value.get<std::string>());
+          } catch (const sdbus::Error&) {
+          }
+        });
+  } catch (const sdbus::Error& e) {
+    kLog.debug("cellular device probe failed {}: {}", normalized, e.what());
+  }
+}
+
 void NetworkManagerService::bindModem(const std::string& modemPath) {
   const std::string normalized = (modemPath.empty() || modemPath == "/") ? std::string{} : modemPath;
   if (normalized == m_modemPath && (normalized.empty() || m_modem != nullptr)) {
@@ -2710,6 +2763,7 @@ void NetworkManagerService::bindModem(const std::string& modemPath) {
         refreshCellularState();
       }
     });
+    refreshCellularState();
   } catch (const sdbus::Error& e) {
     kLog.debug("modem proxy failed {}: {}", normalized, e.what());
     m_modem.reset();
@@ -2731,9 +2785,7 @@ void NetworkManagerService::refreshCellularState() {
       return;
     }
     m_cellularStateReadInFlight = false;
-    if (m_state.kind != NetworkConnectivity::Cellular
-        || (m_state.cellularSignalStrength == percent
-            && m_state.cellularAccessTechnology == accessTechnology)) {
+    if (m_state.cellularSignalStrength == percent && m_state.cellularAccessTechnology == accessTechnology) {
       return;
     }
     m_state.cellularSignalStrength = percent;
@@ -2858,6 +2910,12 @@ void NetworkManagerService::readStateAsync(std::function<void(NetworkState)> onC
   auto next = std::make_shared<NetworkState>();
   next->scanning = m_scanning;
   next->vpnConnected = m_anyVpnConnected;
+  if (std::ranges::any_of(m_cellularConnections, [](const CellularConnectionInfo& connection) {
+        return connection.active;
+      })) {
+    next->cellularSignalStrength = m_state.cellularSignalStrength;
+    next->cellularAccessTechnology = m_state.cellularAccessTechnology;
+  }
 
   bool vpnFromList = false;
   for (const auto& vpn : m_vpnConnections) {

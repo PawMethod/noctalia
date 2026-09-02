@@ -34,6 +34,9 @@ int main() {
   TEST_CHECK(std::string_view(network_display::glyphForState(state)) == "antenna-bars-4");
   state.cellularSignalStrength = 80;
   TEST_CHECK(std::string_view(network_display::glyphForState(state)) == "antenna-bars-5");
+  TEST_CHECK(std::string_view(network_display::cellularGlyphForSignal(0)) == "antenna-bars-1");
+  TEST_CHECK(std::string_view(network_display::cellularGlyphForSignal(35)) == "antenna-bars-3");
+  TEST_CHECK(std::string_view(network_display::cellularGlyphForSignal(80)) == "antenna-bars-5");
 
   TEST_CHECK(network_display::cellularSignalPercentFromRsrp(-141.0) == 0);
   TEST_CHECK(network_display::cellularSignalPercentFromRsrp(-140.0) == 0);

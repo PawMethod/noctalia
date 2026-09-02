@@ -23,23 +23,27 @@ namespace network_display {
       return "antenna-bars-off";
     }
     if (state.kind == NetworkConnectivity::Cellular && state.connected) {
-      switch (wifiSignalBand(state.cellularSignalStrength)) {
-      case 4:
-        return "antenna-bars-5";
-      case 3:
-        return "antenna-bars-4";
-      case 2:
-        return "antenna-bars-3";
-      case 1:
-        return "antenna-bars-2";
-      default:
-        return "antenna-bars-1";
-      }
+      return cellularGlyphForSignal(state.cellularSignalStrength);
     }
     if (state.resolving) {
       return "antenna-bars-1";
     }
     return "antenna";
+  }
+
+  const char* cellularGlyphForSignal(std::uint8_t signal) noexcept {
+    switch (wifiSignalBand(signal)) {
+    case 4:
+      return "antenna-bars-5";
+    case 3:
+      return "antenna-bars-4";
+    case 2:
+      return "antenna-bars-3";
+    case 1:
+      return "antenna-bars-2";
+    default:
+      return "antenna-bars-1";
+    }
   }
 
   std::uint8_t cellularSignalPercentFromRsrp(double rsrpDbm) noexcept {

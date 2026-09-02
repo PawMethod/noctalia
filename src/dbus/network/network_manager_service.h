@@ -111,6 +111,7 @@ private:
   void adoptActiveConnection(const std::string& connectionPath, const std::string& devicePath);
   void rebindActiveDevice(const std::string& devicePath);
   void rebindActiveAccessPoint(const std::string& apPath);
+  void bindCellularDevice(const std::string& devicePath);
   void bindModem(const std::string& modemPath);
   void readCellularState(
       const std::string& modemPath, std::function<void(std::uint8_t, std::string)> done
@@ -139,6 +140,7 @@ private:
   std::string m_activeConnectionPath;
   std::string m_activeDevicePath;
   std::string m_activeApPath;
+  std::string m_cellularDevicePath;
   std::string m_modemPath;
   NetworkState m_state;
   std::vector<AccessPointInfo> m_accessPoints;

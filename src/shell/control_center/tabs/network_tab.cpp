@@ -295,7 +295,8 @@ namespace {
   public:
     ConnectionProfileRow(
         float scale, std::string name, bool active, std::string glyph, std::function<void()> onActivate,
-        std::function<void()> onDeactivate, std::function<void()> onForget = {}, bool connecting = false
+        std::function<void()> onDeactivate, std::function<void()> onForget = {}, bool connecting = false,
+        std::optional<std::uint8_t> signalStrength = std::nullopt
     )
         : m_active(active), m_connecting(connecting), m_savedProfile(static_cast<bool>(onForget)),
           m_onActivate(std::move(onActivate)), m_onDeactivate(std::move(onDeactivate)),
@@ -311,6 +312,7 @@ namespace {
 
       addChild(
           ui::glyph({
+              .out = &m_profileGlyph,
               .glyph = std::move(glyph),
               .glyphSize = Style::baseGlyphSize * scale,
               .color = colorSpecFromRole(ColorRole::OnSurfaceVariant),
@@ -327,6 +329,17 @@ namespace {
               .flexGrow = 1.0F,
           })
       );
+
+      if (signalStrength.has_value()) {
+          addChild(
+            ui::label({
+                .out = &m_signalValue,
+                .text = percentText(*signalStrength),
+                .fontSize = Style::fontSizeCaption * scale,
+                .color = colorSpecFromRole(ColorRole::OnSurfaceVariant),
+            })
+          );
+      }
 
       if (!m_savedProfile) {
         addChild(
@@ -410,6 +423,9 @@ namespace {
 
     void doArrange(Renderer& renderer, const LayoutRect& rect) override { arrangeByLayout(renderer, rect); }
 
+    [[nodiscard]] Glyph* profileGlyph() const noexcept { return m_profileGlyph; }
+    [[nodiscard]] Label* signalValue() const noexcept { return m_signalValue; }
+
   private:
     void triggerAction() {
       if (m_connecting) {
@@ -461,6 +477,8 @@ namespace {
     std::function<void()> m_onDeactivate;
     std::function<void()> m_onForget;
     Label* m_title = nullptr;
+    Glyph* m_profileGlyph = nullptr;
+    Label* m_signalValue = nullptr;
     Button* m_checkButton = nullptr;
     Button* m_actionButton = nullptr;
     InputArea* m_inputArea = nullptr;
@@ -665,6 +683,7 @@ void NetworkTab::doLayout(Renderer& renderer, float contentWidth, float bodyHeig
   syncPasswordCard();
   rebuildApList(renderer);
   syncApRows();
+  syncCellularRows();
   syncCurrentCard();
   m_rootLayout->layout(renderer);
 }
@@ -673,7 +692,9 @@ void NetworkTab::doUpdate(Renderer& renderer) {
   syncPasswordCard();
   rebuildApList(renderer);
   // A signal percent's text changes its width, so the list has to be laid out again.
-  if (syncApRows() && m_list != nullptr) {
+  const bool wifiMetricsChanged = syncApRows();
+  const bool cellularMetricsChanged = syncCellularRows();
+  if ((wifiMetricsChanged || cellularMetricsChanged) && m_list != nullptr) {
     m_list->layout(renderer);
   }
   syncCurrentCard();
@@ -702,6 +723,7 @@ void NetworkTab::onClose() {
   m_currentRow = nullptr;
   m_disconnectButton = nullptr;
   m_apRows.clear();
+  m_cellularRows.clear();
   m_lastStructureKey.clear();
   m_lastListWidth = -1.0F;
   m_pendingAccessPoint.reset();
@@ -1195,6 +1217,7 @@ void NetworkTab::rebuildApList(Renderer& renderer) {
   m_scanSpinner = nullptr;
   m_rescanButton = nullptr;
   m_apRows.clear();
+  m_cellularRows.clear();
 
   while (!m_list->children().empty()) {
     m_list->removeChild(m_list->children().front().get());
@@ -1295,8 +1318,12 @@ void NetworkTab::rebuildApList(Renderer& renderer) {
 
       if (m_network->state().cellularEnabled) {
         for (const auto& connection : cellular) {
+          const auto signalStrength = connection.active
+              ? std::optional<std::uint8_t>{m_network->state().cellularSignalStrength}
+              : std::nullopt;
           auto row = std::make_unique<ConnectionProfileRow>(
-            scale, connection.name, connection.connected, "antenna-bars-5",
+              scale, connection.name, connection.connected,
+              signalStrength.has_value() ? network_display::cellularGlyphForSignal(*signalStrength) : "antenna",
               [this, connection]() {
                 if (m_network != nullptr) {
                   m_network->activateCellularConnection(connection);
@@ -1308,8 +1335,14 @@ void NetworkTab::rebuildApList(Renderer& renderer) {
                   m_network->forgetCellularConnection(connection);
                 }
               },
-              connection.active && !connection.connected
+              connection.active && !connection.connected,
+              signalStrength
           );
+          if (signalStrength.has_value()) {
+            m_cellularRows.emplace(
+                connection.path, CellularRowMetrics{.glyph = row->profileGlyph(), .value = row->signalValue()}
+            );
+          }
           cellularCard->addChild(std::move(row));
         }
       }
@@ -1435,6 +1468,25 @@ bool NetworkTab::syncApRows() {
   for (const auto& ap : m_network->accessPoints()) {
     const auto it = m_apRows.find(ap.ssid);
     if (it != m_apRows.end() && it->second->syncLiveMetrics(ap)) {
+      changed = true;
+    }
+  }
+  return changed;
+}
+
+bool NetworkTab::syncCellularRows() {
+  if (m_network == nullptr || m_cellularRows.empty()) {
+    return false;
+  }
+  bool changed = false;
+  const std::uint8_t signalStrength = m_network->state().cellularSignalStrength;
+  for (const auto& entry : m_cellularRows) {
+    const auto& metrics = entry.second;
+    if (metrics.glyph != nullptr
+        && metrics.glyph->setGlyph(network_display::cellularGlyphForSignal(signalStrength))) {
+      changed = true;
+    }
+    if (metrics.value != nullptr && metrics.value->setText(percentText(signalStrength))) {
       changed = true;
     }
   }
