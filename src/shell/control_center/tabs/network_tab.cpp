@@ -341,26 +341,27 @@ namespace {
         );
       }
 
-      addChild(
-          ui::button({
-              .out = &m_actionButton,
-              .glyph = m_savedProfile ? (m_active ? "check" : "trash") : (m_active ? "plug-off" : "plug"),
-              .glyphSize = Style::baseGlyphSize * scale,
-              .variant = m_savedProfile ? ButtonVariant::Ghost
-                                        : (m_active ? ButtonVariant::Destructive : ButtonVariant::Default),
-              .padding = Style::spaceXs * scale,
-              .radius = Style::scaledRadiusSm(scale),
-              .onClick = [this]() {
-                if (m_savedProfile && !m_active) {
-                  if (m_onForget) {
-                    m_onForget();
-                  }
-                  return;
-                }
-                triggerAction();
-              },
-          })
-      );
+      auto actionButton = ui::button({
+          .out = &m_actionButton,
+          .glyph = m_savedProfile ? (m_active ? "check" : "trash") : (m_active ? "plug-off" : "plug"),
+          .glyphSize = Style::baseGlyphSize * scale,
+          .variant = m_savedProfile ? ButtonVariant::Ghost
+                                    : (m_active ? ButtonVariant::Destructive : ButtonVariant::Default),
+          .padding = Style::spaceXs * scale,
+          .radius = Style::scaledRadiusSm(scale),
+      });
+      if (!m_savedProfile || !m_active) {
+        actionButton->setOnClick([this]() {
+          if (m_savedProfile) {
+            if (m_onForget) {
+              m_onForget();
+            }
+            return;
+          }
+          triggerAction();
+        });
+      }
+      addChild(std::move(actionButton));
 
       auto area = ui::inputArea({});
       area->setPropagateEvents(true);
