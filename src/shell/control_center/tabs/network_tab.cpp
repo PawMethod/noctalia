@@ -295,10 +295,11 @@ namespace {
   public:
     ConnectionProfileRow(
         float scale, std::string name, bool active, std::string glyph, std::function<void()> onActivate,
-        std::function<void()> onDeactivate, std::function<void()> onForget = {}
+        std::function<void()> onDeactivate, std::function<void()> onForget = {}, bool connecting = false
     )
-        : m_active(active), m_savedProfile(static_cast<bool>(onForget)), m_onActivate(std::move(onActivate)),
-          m_onDeactivate(std::move(onDeactivate)), m_onForget(std::move(onForget)) {
+        : m_active(active), m_connecting(connecting), m_savedProfile(static_cast<bool>(onForget)),
+          m_onActivate(std::move(onActivate)), m_onDeactivate(std::move(onDeactivate)),
+          m_onForget(std::move(onForget)) {
       setDirection(FlexDirection::Horizontal);
       setAlign(FlexAlign::Center);
       setGap(Style::spaceSm * scale);
@@ -316,14 +317,14 @@ namespace {
           })
       );
 
-        addChild(
+      addChild(
           ui::label({
               .out = &m_title,
               .text = std::move(name),
               .fontSize = Style::fontSizeBody * scale,
-              .fontWeight = m_active ? FontWeight::Bold : FontWeight::Normal,
+              .fontWeight = (m_active || m_connecting) ? FontWeight::Bold : FontWeight::Normal,
               .color = colorSpecFromRole(ColorRole::OnSurface),
-            .flexGrow = 1.0F,
+              .flexGrow = 1.0F,
           })
       );
 
@@ -341,34 +342,46 @@ namespace {
         );
       }
 
-      auto actionButton = ui::button({
-          .out = &m_actionButton,
-          .glyph = m_savedProfile ? (m_active ? "check" : "trash") : (m_active ? "plug-off" : "plug"),
-          .glyphSize = Style::baseGlyphSize * scale,
-          .variant = m_savedProfile ? ButtonVariant::Ghost
-                                    : (m_active ? ButtonVariant::Destructive : ButtonVariant::Default),
-          .padding = Style::spaceXs * scale,
-          .radius = Style::scaledRadiusSm(scale),
-      });
-      if (!m_savedProfile || !m_active) {
-        actionButton->setOnClick([this]() {
-          if (m_savedProfile) {
-            if (m_onForget) {
-              m_onForget();
-            }
-            return;
-          }
-          triggerAction();
+      if (m_connecting) {
+        addChild(
+            ui::spinner({
+                .color = colorSpecFromRole(ColorRole::Primary),
+                .spinnerSize = Style::baseGlyphSize * scale,
+                .spinning = true,
+            })
+        );
+      } else {
+        auto actionButton = ui::button({
+            .out = &m_actionButton,
+            .glyph = m_savedProfile ? (m_active ? "check" : "trash") : (m_active ? "plug-off" : "plug"),
+            .glyphSize = Style::baseGlyphSize * scale,
+            .variant = m_savedProfile ? ButtonVariant::Ghost
+                                      : (m_active ? ButtonVariant::Destructive : ButtonVariant::Default),
+            .padding = Style::spaceXs * scale,
+            .radius = Style::scaledRadiusSm(scale),
         });
+        if (!m_savedProfile || !m_active) {
+          actionButton->setOnClick([this]() {
+            if (m_savedProfile) {
+              if (m_onForget) {
+                m_onForget();
+              }
+              return;
+            }
+            triggerAction();
+          });
+        }
+        addChild(std::move(actionButton));
       }
-      addChild(std::move(actionButton));
 
       auto area = ui::inputArea({});
-      area->setPropagateEvents(true);
-      area->setOnEnter([this](const InputArea::PointerData& /*data*/) { applyState(); });
-      area->setOnLeave([this]() { applyState(); });
-      area->setOnPress([this](const InputArea::PointerData& /*data*/) { applyState(); });
-      area->setOnClick([this](const InputArea::PointerData& /*data*/) { triggerAction(); });
+      if (!m_connecting) {
+        area->setPropagateEvents(true);
+        area->setOnEnter([this](const InputArea::PointerData& /*data*/) { applyState(); });
+        area->setOnLeave([this]() { applyState(); });
+        area->setOnPress([this](const InputArea::PointerData& /*data*/) { applyState(); });
+        area->setOnClick([this](const InputArea::PointerData& /*data*/) { triggerAction(); });
+      }
       m_inputArea = static_cast<InputArea*>(addChild(std::move(area)));
 
       applyState();
@@ -399,6 +412,9 @@ namespace {
 
   private:
     void triggerAction() {
+      if (m_connecting) {
+        return;
+      }
       if (m_savedProfile) {
         if (!m_active && m_onActivate) {
           m_onActivate();
@@ -439,6 +455,7 @@ namespace {
     }
 
     bool m_active = false;
+    bool m_connecting = false;
     bool m_savedProfile = false;
     std::function<void()> m_onActivate;
     std::function<void()> m_onDeactivate;
@@ -1042,6 +1059,8 @@ NetworkTab::structureKey(
     key += connection.name;
     key.push_back(':');
     key += connection.active ? '1' : '0';
+    key.push_back(':');
+    key += connection.connected ? '1' : '0';
     key.push_back('\n');
   }
   const bool wirelessEnabled = m_network != nullptr && m_network->state().wirelessEnabled;
@@ -1288,7 +1307,8 @@ void NetworkTab::rebuildApList(Renderer& renderer) {
                 if (m_network != nullptr) {
                   m_network->forgetCellularConnection(connection);
                 }
-              }
+              },
+              connection.active && !connection.connected
           );
           cellularCard->addChild(std::move(row));
         }

@@ -86,6 +86,7 @@ private:
   void refreshVpnConnections(std::function<void()> onComplete);
   void refreshCellularConnections(std::function<void()> onComplete);
   void reconcileVpnActiveWatchers(const std::set<std::string>& activePaths);
+  void reconcileCellularActiveWatchers(const std::set<std::string>& activePaths);
   void finishSavedConnections(
       std::vector<std::string>& ssids, std::vector<std::string>& wiredConnectionPaths, std::function<void()> onComplete
   );
@@ -134,6 +135,7 @@ private:
   std::unique_ptr<sdbus::IProxy> m_modem;
   std::unordered_map<std::string, std::unique_ptr<sdbus::IProxy>> m_wifiDevices;
   std::unordered_map<std::string, std::unique_ptr<sdbus::IProxy>> m_vpnActiveWatchers;
+  std::unordered_map<std::string, std::unique_ptr<sdbus::IProxy>> m_cellularActiveWatchers;
   std::string m_activeConnectionPath;
   std::string m_activeDevicePath;
   std::string m_activeApPath;

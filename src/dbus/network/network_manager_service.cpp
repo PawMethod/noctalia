@@ -153,6 +153,7 @@ namespace {
   struct ActiveCellularState {
     std::set<std::string> activeProfilePaths;
     std::set<std::string> connectedProfilePaths;
+    std::set<std::string> cellularActivePaths;
     int pending = 0;
   };
 
@@ -1778,6 +1779,7 @@ void NetworkManagerService::refreshCellularConnections(std::function<void()> onC
           }
           if (connectionPaths.empty()) {
             m_cellularConnections.clear();
+            reconcileCellularActiveWatchers({});
             onComplete();
             return;
           }
@@ -1822,13 +1824,14 @@ void NetworkManagerService::refreshCellularConnections(std::function<void()> onC
                     }
                   }
                   if (activePaths.empty()) {
+                    reconcileCellularActiveWatchers({});
                     finalize();
                     return;
                   }
 
                   auto activeState = std::make_shared<ActiveCellularState>();
                   activeState->pending = static_cast<int>(activePaths.size());
-                  auto onActiveComplete = [lifetimeToken, cellularState, activeState, finalize]() {
+                  auto onActiveComplete = [this, lifetimeToken, cellularState, activeState, finalize]() {
                     if (lifetimeToken.expired()) {
                       return;
                     }
@@ -1837,6 +1840,7 @@ void NetworkManagerService::refreshCellularConnections(std::function<void()> onC
                         connection.active = activeState->activeProfilePaths.contains(connection.path);
                         connection.connected = activeState->connectedProfilePaths.contains(connection.path);
                       }
+                      reconcileCellularActiveWatchers(activeState->cellularActivePaths);
                       finalize();
                     }
                   };
@@ -1846,10 +1850,12 @@ void NetworkManagerService::refreshCellularConnections(std::function<void()> onC
                       auto active = std::shared_ptr<sdbus::IProxy>(
                           sdbus::createProxy(m_bus.connection(), kNmBusName, activePath)
                       );
+                      const std::string activePathStr{activePath};
                       active->callMethodAsync("GetAll")
                           .onInterface(kPropertiesInterface)
                           .withArguments(kNmActiveConnectionInterface)
-                          .uponReplyInvoke([lifetimeToken, active, cellularState, activeState, onActiveComplete](
+                          .uponReplyInvoke([lifetimeToken, active, cellularState, activeState, activePathStr,
+                                            onActiveComplete](
                                                std::optional<sdbus::Error> getAllErr,
                                                std::map<std::string, sdbus::Variant> properties
                                            ) {
@@ -1871,12 +1877,14 @@ void NetworkManagerService::refreshCellularConnections(std::function<void()> onC
                                 } catch (const sdbus::Error&) {
                                 }
                               }
-                              if (cellularState->profilePaths.contains(profilePath)
-                                  && (state == kNmActiveConnectionStateActivating
-                                      || state == kNmActiveConnectionStateActivated)) {
-                                activeState->activeProfilePaths.insert(profilePath);
-                                if (state == kNmActiveConnectionStateActivated) {
-                                  activeState->connectedProfilePaths.insert(profilePath);
+                              if (cellularState->profilePaths.contains(profilePath)) {
+                                activeState->cellularActivePaths.insert(activePathStr);
+                                if (state == kNmActiveConnectionStateActivating
+                                    || state == kNmActiveConnectionStateActivated) {
+                                  activeState->activeProfilePaths.insert(profilePath);
+                                  if (state == kNmActiveConnectionStateActivated) {
+                                    activeState->connectedProfilePaths.insert(profilePath);
+                                  }
                                 }
                               }
                             }
@@ -1937,6 +1945,34 @@ void NetworkManagerService::refreshCellularConnections(std::function<void()> onC
   } catch (const sdbus::Error& e) {
     kLog.debug("refreshCellularConnections: {}", e.what());
     onComplete();
+  }
+}
+
+void NetworkManagerService::reconcileCellularActiveWatchers(const std::set<std::string>& activePaths) {
+  // A cellular state transition does not move PrimaryConnection while Wi-Fi remains preferred.
+  std::erase_if(
+      m_cellularActiveWatchers, [&activePaths](const auto& entry) { return !activePaths.contains(entry.first); }
+  );
+  for (const auto& activePath : activePaths) {
+    if (m_cellularActiveWatchers.contains(activePath)) {
+      continue;
+    }
+    try {
+      auto proxy = sdbus::createProxy(m_bus.connection(), kNmBusName, sdbus::ObjectPath{activePath});
+      proxy->uponSignal("PropertiesChanged")
+          .onInterface(kPropertiesInterface)
+          .call([this](
+                    const std::string& interfaceName, const std::map<std::string, sdbus::Variant>& changedProperties,
+                    const std::vector<std::string>& /*invalidatedProperties*/
+                ) {
+            if (interfaceName == kNmActiveConnectionInterface && changedProperties.contains("State")) {
+              refresh();
+            }
+          });
+      m_cellularActiveWatchers.emplace(activePath, std::move(proxy));
+    } catch (const sdbus::Error& e) {
+      kLog.debug("cellular active watcher failed {}: {}", activePath, e.what());
+    }
   }
 }
 
