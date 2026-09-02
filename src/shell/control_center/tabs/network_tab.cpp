@@ -67,9 +67,7 @@ namespace {
         append(band);
       }
     } else if (s.kind == NetworkConnectivity::Cellular) {
-      if (s.cellularSignalStrength > 0) {
-        append(std::to_string(static_cast<int>(s.cellularSignalStrength)) + "%");
-      }
+      append(std::to_string(static_cast<int>(s.cellularSignalStrength)) + "%");
       if (!s.cellularAccessTechnology.empty()) {
         append(s.cellularAccessTechnology);
       }
