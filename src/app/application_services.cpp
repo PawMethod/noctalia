@@ -1086,6 +1086,14 @@ void Application::initSystemBusServices() {
               }
             });
           }
+          if (m_networkService != nullptr) {
+            m_networkService->onResume();
+            m_networkResumeTimer.start(std::chrono::seconds(3), [this]() {
+              if (m_networkService != nullptr) {
+                m_networkService->onResume();
+              }
+            });
+          }
           requestAllSurfacesRedraw();
         });
         kLog.info("logind sleep monitor active");

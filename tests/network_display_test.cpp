@@ -38,6 +38,20 @@ int main() {
   TEST_CHECK(std::string_view(network_display::cellularGlyphForSignal(35)) == "antenna-bars-3");
   TEST_CHECK(std::string_view(network_display::cellularGlyphForSignal(80)) == "antenna-bars-5");
 
+  CellularConnectionInfo cellular{
+      .path = "/profile/1",
+      .name = "cellular",
+      .devicePath = "/device/1",
+      .active = true,
+  };
+  state.cellularDevicePath = "/device/1";
+  TEST_CHECK(network_display::shouldShowCellularSignal(cellular, state));
+  cellular.active = false;
+  TEST_CHECK(!network_display::shouldShowCellularSignal(cellular, state));
+  cellular.active = true;
+  cellular.devicePath = "/device/2";
+  TEST_CHECK(!network_display::shouldShowCellularSignal(cellular, state));
+
   TEST_CHECK(network_display::cellularSignalPercentFromRsrp(-111.0) == 0);
   TEST_CHECK(network_display::cellularSignalPercentFromRsrp(-110.0) == 0);
   TEST_CHECK(network_display::cellularSignalPercentFromRsrp(-109.6) == 0);
@@ -52,9 +66,7 @@ int main() {
   TEST_CHECK(std::string_view(network_display::cellularAccessTechnologyLabel(1U << 5U)) == "UMTS");
   TEST_CHECK(std::string_view(network_display::cellularAccessTechnologyLabel(1U << 14U)) == "LTE");
   TEST_CHECK(std::string_view(network_display::cellularAccessTechnologyLabel(1U << 15U)) == "5G NR");
-  TEST_CHECK(
-      std::string_view(network_display::cellularAccessTechnologyLabel((1U << 14U) | (1U << 15U))) == "5G NR"
-  );
+  TEST_CHECK(std::string_view(network_display::cellularAccessTechnologyLabel((1U << 14U) | (1U << 15U))) == "5G NR");
 
   return 0;
 }

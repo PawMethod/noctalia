@@ -57,7 +57,6 @@ public:
   bool activateVpnConnection(const VpnConnectionInfo& vpn) override;
   bool deactivateVpnConnection(const VpnConnectionInfo& vpn) override;
   bool activateCellularConnection(const CellularConnectionInfo& cellular) override;
-  bool deactivateCellularConnection(const CellularConnectionInfo& cellular) override;
   bool addCellularConnection(const std::string& name, const std::string& apn) override;
   bool saveCellularPin(const std::string& connectionPath, const std::string& pin) override;
   bool forgetCellularConnection(const CellularConnectionInfo& cellular) override;
@@ -78,24 +77,21 @@ public:
   [[nodiscard]] bool hasSavedConnection(const std::string& ssid) const override;
   [[nodiscard]] bool supportsSecretAgent() const noexcept override { return true; }
   void onSecretAgentReady() override;
+  void onResume() override;
   [[nodiscard]] bool supportsCellular() const noexcept override { return m_state.cellularAvailable; }
 
 private:
   void refreshAccessPoints(std::function<void()> onComplete);
-  void refreshSavedConnections(std::function<void()> onComplete);
-  void refreshVpnConnections(std::function<void()> onComplete);
-  void refreshCellularConnections(std::function<void()> onComplete);
+  void refreshConnectionProfiles(std::function<void()> onComplete);
   void reconcileVpnActiveWatchers(const std::set<std::string>& activePaths);
   void reconcileCellularActiveWatchers(const std::set<std::string>& activePaths);
-  void finishSavedConnections(
-      std::vector<std::string>& ssids, std::vector<std::string>& wiredConnectionPaths, std::function<void()> onComplete
-  );
   void finishRefreshAccessPoints(std::vector<AccessPointInfo>& aps, std::function<void()> onComplete);
   bool addAndActivateAccessPoint(const AccessPointInfo& ap, const std::optional<std::string>& psk);
   void watchPendingAccessPointActivation(
       const std::string& ssid, const std::string& connectionPath, const std::string& activePath
   );
   void handlePendingAccessPointActivationState(const std::string& activePath, std::uint32_t state);
+  bool activateConnectionProfile(const std::string& path, const std::string& name);
   void persistConnectionToDisk(const std::string& connectionPath, const std::string& ssid);
   void deleteUnsavedConnection(const std::string& connectionPath, const std::string& ssid);
   // Async rebind pipeline. All proxy destruction happens in async reply
@@ -113,9 +109,7 @@ private:
   void rebindActiveAccessPoint(const std::string& apPath);
   void bindCellularDevice(const std::string& devicePath);
   void bindModem(const std::string& modemPath);
-  void readCellularState(
-      const std::string& modemPath, std::function<void(std::uint8_t, std::string)> done
-  );
+  void readCellularState(const std::string& modemPath, std::function<void(std::uint8_t, std::string)> done);
   void refreshCellularState();
   void ensureWifiDeviceSubscribed(const std::string& devicePath);
   void
@@ -148,6 +142,7 @@ private:
   std::vector<CellularConnectionInfo> m_cellularConnections;
   std::vector<std::string> m_savedSsids;
   std::vector<std::string> m_savedWiredConnectionPaths;
+  std::set<std::string> m_pendingProfileActivations;
   std::unordered_map<std::string, std::unique_ptr<PendingAccessPointActivation>> m_pendingApActivations;
   // Finished activations whose proxy may still be executing its own handler;
   // freed at the next refresh completion (an async reply context).

@@ -363,6 +363,7 @@ std::vector<TooltipRow> NetworkWidget::buildTooltipRows() const {
           {i18n::tr("bar.widgets.network.network"),
            s.connectionName.empty() ? i18n::tr("control-center.network.cellular") : s.connectionName}
       );
+      rows.push_back({i18n::tr("bar.widgets.network.signal"), std::to_string(s.cellularSignalStrength) + "%"});
       if (!s.interfaceName.empty()) {
         rows.push_back({i18n::tr("bar.widgets.network.interface"), s.interfaceName});
       }

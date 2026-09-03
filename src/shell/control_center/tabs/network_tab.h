@@ -59,8 +59,7 @@ private:
   void submitPasswordPrompt(const std::string& value);
   void cancelPasswordPrompt();
   void clearPasswordPrompt();
-  [[nodiscard]] std::string
-  structureKey(
+  [[nodiscard]] std::string structureKey(
       const std::vector<AccessPointInfo>& aps, const std::vector<VpnConnectionInfo>& vpns,
       const std::vector<CellularConnectionInfo>& cellular
   ) const;
@@ -101,13 +100,14 @@ private:
     Glyph* glyph = nullptr;
     Label* value = nullptr;
   };
-  std::unordered_map<std::string, CellularRowMetrics> m_cellularRows;
+  std::vector<CellularRowMetrics> m_cellularRows;
 
   std::string m_lastStructureKey;
   float m_lastListWidth = -1.0F;
 
   bool m_hasPendingSecret = false;
   bool m_secretSubmitting = false;
+  std::chrono::steady_clock::time_point m_secretSubmittingSince;
   NetworkSecretAgent::SecretKind m_pendingSecretKind = NetworkSecretAgent::SecretKind::WifiPsk;
   std::string m_pendingSecretName;
   std::string m_pendingSecretConnectionPath;
@@ -135,4 +135,5 @@ private:
   Timer m_actionPendingTimer;
 
   static constexpr std::chrono::seconds kActionPendingTimeout = std::chrono::seconds(6);
+  static constexpr std::chrono::seconds kSecretSubmittingTimeout = std::chrono::seconds(45);
 };

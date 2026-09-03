@@ -26,7 +26,8 @@ namespace {
   constexpr float kRowMinHeight = Style::controlHeightLg;
 
   bool isValidSimPin(std::string_view value) {
-    return value.size() >= 4 && value.size() <= 8
+    return value.size() >= 4
+        && value.size() <= 8
         && std::ranges::all_of(value, [](char digit) { return digit >= '0' && digit <= '9'; });
   }
 
@@ -329,20 +330,19 @@ namespace {
       );
 
       if (signalStrength.has_value()) {
-          addChild(
+        addChild(
             ui::label({
                 .out = &m_signalValue,
                 .text = percentText(*signalStrength),
                 .fontSize = Style::fontSizeCaption * scale,
                 .color = colorSpecFromRole(ColorRole::OnSurfaceVariant),
             })
-          );
+        );
       }
 
       if (!m_savedProfile) {
         addChild(
             ui::button({
-                .out = &m_checkButton,
                 .glyph = "check",
                 .glyphSize = Style::baseGlyphSize * scale,
                 .variant = ButtonVariant::Ghost,
@@ -477,7 +477,6 @@ namespace {
     Label* m_title = nullptr;
     Glyph* m_profileGlyph = nullptr;
     Label* m_signalValue = nullptr;
-    Button* m_checkButton = nullptr;
     Button* m_actionButton = nullptr;
     InputArea* m_inputArea = nullptr;
     Signal<>::ScopedConnection m_paletteConn;
@@ -724,9 +723,6 @@ void NetworkTab::onClose() {
   m_cellularRows.clear();
   m_lastStructureKey.clear();
   m_lastListWidth = -1.0F;
-  m_pendingAccessPoint.reset();
-  m_pendingSecretConnectionPath.clear();
-  m_pendingSimPin.clear();
   m_active = false;
   m_actionPending = false;
   m_actionPendingTimer.stop();
@@ -840,9 +836,9 @@ void NetworkTab::submitPasswordPrompt(const std::string& value) {
   } else if (m_secrets != nullptr) {
     if (m_pendingSecretKind == NetworkSecretAgent::SecretKind::SimPin) {
       m_secretSubmitting = true;
-      m_pendingSimPin = security::SecureBuffer(
-          std::span(reinterpret_cast<const std::uint8_t*>(value.data()), value.size())
-      );
+      m_secretSubmittingSince = std::chrono::steady_clock::now();
+      m_pendingSimPin =
+          security::SecureBuffer(std::span(reinterpret_cast<const std::uint8_t*>(value.data()), value.size()));
       if (m_passwordInput != nullptr) {
         m_passwordInput->setEnabled(false);
       }
@@ -907,6 +903,8 @@ void NetworkTab::syncCurrentCard() {
       const auto pinBytes = m_pendingSimPin.bytes();
       const std::string pin(reinterpret_cast<const char*>(pinBytes.data()), pinBytes.size());
       m_network->saveCellularPin(connected->path, pin);
+      clearPasswordPrompt();
+    } else if (std::chrono::steady_clock::now() - m_secretSubmittingSince > kSecretSubmittingTimeout) {
       clearPasswordPrompt();
     }
   }
@@ -1045,10 +1043,9 @@ void NetworkTab::handleCellularEnabledCompletion(std::uint64_t generation, bool 
 // each carries, and how each activates. The signal strength is absent by design —
 // it refreshes in place through syncApRows(), so a scan update no longer tears the
 // list down. Access points arrive sorted, so a change in row order changes the key.
-std::string
-NetworkTab::structureKey(
-  const std::vector<AccessPointInfo>& aps, const std::vector<VpnConnectionInfo>& vpns,
-  const std::vector<CellularConnectionInfo>& cellular
+std::string NetworkTab::structureKey(
+    const std::vector<AccessPointInfo>& aps, const std::vector<VpnConnectionInfo>& vpns,
+    const std::vector<CellularConnectionInfo>& cellular
 ) const {
   std::string key;
   for (const auto& ap : aps) {
@@ -1084,13 +1081,10 @@ NetworkTab::structureKey(
     key.push_back('\n');
   }
   const bool wirelessEnabled = m_network != nullptr && m_network->state().wirelessEnabled;
-  const bool scanning = m_network != nullptr && m_network->state().scanning;
   key += "vis:";
   key += m_vpnVisible ? '1' : '0';
   key += "\nwifi:";
   key += wirelessEnabled ? '1' : '0';
-  key += "\nscan:";
-  key += scanning ? '1' : '0';
   key += "\ncellular-enabled:";
   key += (m_network != nullptr && m_network->state().cellularEnabled) ? '1' : '0';
   key += "\ncellular-setup:";
@@ -1240,35 +1234,34 @@ void NetworkTab::rebuildApList(Renderer& renderer) {
       });
       auto cellularHeader = makeCardHeaderRow(i18n::tr("control-center.network.cellular"), scale);
       cellularHeader->addChild(
-            ui::button({
-                .glyph = m_cellularSetupVisible ? "x" : "plus",
-                .glyphSize = Style::baseGlyphSize * scale,
-                .variant = ButtonVariant::Ghost,
-                .tooltip = i18n::tr(
-                    m_cellularSetupVisible ? "common.actions.cancel" : "control-center.network.add-cellular"
-                ),
-                .padding = Style::spaceXs * scale,
-                .radius = Style::scaledRadiusSm(scale),
-                .onClick = [this]() {
-                  if (m_cellularSetupVisible) {
-                    closeCellularSetup();
-                  } else {
-                    m_cellularSetupVisible = true;
-                    m_lastStructureKey.clear();
-                    PanelManager::instance().refresh();
-                  }
-                },
-            })
-        );
+          ui::button({
+              .glyph = m_cellularSetupVisible ? "x" : "plus",
+              .glyphSize = Style::baseGlyphSize * scale,
+              .variant = ButtonVariant::Ghost,
+              .tooltip =
+                  i18n::tr(m_cellularSetupVisible ? "common.actions.cancel" : "control-center.network.add-cellular"),
+              .padding = Style::spaceXs * scale,
+              .radius = Style::scaledRadiusSm(scale),
+              .onClick = [this]() {
+                if (m_cellularSetupVisible) {
+                  closeCellularSetup();
+                } else {
+                  m_cellularSetupVisible = true;
+                  m_lastStructureKey.clear();
+                  PanelManager::instance().refresh();
+                }
+              },
+          })
+      );
       cellularHeader->addChild(
           ui::toggle({
-            .out = &m_cellularToggle,
-            .checkedImmediate = m_network->state().cellularEnabled,
-            .toggleSize = ToggleSize::Medium,
-            .scale = scale,
-            .onChange = [this](bool checked) { requestCellularEnabled(checked); },
+              .out = &m_cellularToggle,
+              .checkedImmediate = m_network->state().cellularEnabled,
+              .toggleSize = ToggleSize::Medium,
+              .scale = scale,
+              .onChange = [this](bool checked) { requestCellularEnabled(checked); },
           })
-        );
+      );
       cellularCard->addChild(std::move(cellularHeader));
 
       if (m_cellularSetupVisible) {
@@ -1316,7 +1309,7 @@ void NetworkTab::rebuildApList(Renderer& renderer) {
 
       if (m_network->state().cellularEnabled) {
         for (const auto& connection : cellular) {
-          const auto signalStrength = connection.active
+          const auto signalStrength = network_display::shouldShowCellularSignal(connection, m_network->state())
               ? std::optional<std::uint8_t>{m_network->state().cellularSignalStrength}
               : std::nullopt;
           auto row = std::make_unique<ConnectionProfileRow>(
@@ -1333,13 +1326,10 @@ void NetworkTab::rebuildApList(Renderer& renderer) {
                   m_network->forgetCellularConnection(connection);
                 }
               },
-              connection.active && !connection.connected,
-              signalStrength
+              connection.active && !connection.connected, signalStrength
           );
           if (signalStrength.has_value()) {
-            m_cellularRows.emplace(
-                connection.path, CellularRowMetrics{.glyph = row->profileGlyph(), .value = row->signalValue()}
-            );
+            m_cellularRows.push_back(CellularRowMetrics{.glyph = row->profileGlyph(), .value = row->signalValue()});
           }
           cellularCard->addChild(std::move(row));
         }
@@ -1478,10 +1468,8 @@ bool NetworkTab::syncCellularRows() {
   }
   bool changed = false;
   const std::uint8_t signalStrength = m_network->state().cellularSignalStrength;
-  for (const auto& entry : m_cellularRows) {
-    const auto& metrics = entry.second;
-    if (metrics.glyph != nullptr
-        && metrics.glyph->setGlyph(network_display::cellularGlyphForSignal(signalStrength))) {
+  for (const auto& metrics : m_cellularRows) {
+    if (metrics.glyph != nullptr && metrics.glyph->setGlyph(network_display::cellularGlyphForSignal(signalStrength))) {
       changed = true;
     }
     if (metrics.value != nullptr && metrics.value->setText(percentText(signalStrength))) {

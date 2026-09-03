@@ -26,6 +26,7 @@ struct VpnConnectionInfo {
 struct CellularConnectionInfo {
   std::string path; // NetworkManager settings connection object path.
   std::string name;
+  std::string devicePath;
   bool active = false;
   bool connected = false;
 
@@ -48,15 +49,16 @@ struct NetworkState {
   bool cellularEnabled = false;
   bool cellularAvailable = false;
   bool scanning = false;
-  bool vpnActive = false;          // a VPN connection is active or activating
-  bool vpnConnected = false;       // a VPN tunnel is fully activated (routes applied)
-  std::string ssid;                // Wi-Fi only
-  std::string connectionName;      // Active NetworkManager profile name.
-  std::string ipv4;                // dotted-quad of first address; empty if none
-  std::string interfaceName;       // e.g. "wlan0", "eth0"
-  std::uint8_t signalStrength = 0; // 0..100, Wi-Fi only
+  bool vpnActive = false;                  // a VPN connection is active or activating
+  bool vpnConnected = false;               // a VPN tunnel is fully activated (routes applied)
+  std::string ssid;                        // Wi-Fi only
+  std::string connectionName;              // Active NetworkManager profile name.
+  std::string ipv4;                        // dotted-quad of first address; empty if none
+  std::string interfaceName;               // e.g. "wlan0", "eth0"
+  std::uint8_t signalStrength = 0;         // 0..100, Wi-Fi only
   std::uint8_t cellularSignalStrength = 0; // 0..100, cellular only
   std::string cellularAccessTechnology;
+  std::string cellularDevicePath;
   // Operating frequency of the associated BSS. Wi-Fi only; 0 when the backend
   // does not report one (iwd).
   std::uint32_t frequencyMhz = 0;

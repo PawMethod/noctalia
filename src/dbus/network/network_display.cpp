@@ -46,6 +46,10 @@ namespace network_display {
     }
   }
 
+  bool shouldShowCellularSignal(const CellularConnectionInfo& connection, const NetworkState& state) noexcept {
+    return connection.active && !connection.devicePath.empty() && connection.devicePath == state.cellularDevicePath;
+  }
+
   std::uint8_t cellularSignalPercentFromRsrp(double rsrpDbm) noexcept {
     if (!std::isfinite(rsrpDbm) || rsrpDbm <= -110.0) {
       return 0;

@@ -126,8 +126,8 @@ struct NetworkSecretAgent::Impl {
     request.connectionName = simPin ? extractConnectionName(connection) : extractSsid(connection);
     request.connectionPath = std::string(connectionPath);
     kLog.info(
-        "GetSecrets prompt type={} connection=\"{}\" path={}", simPin ? "sim-pin" : "wifi-psk",
-        request.connectionName, std::string(connectionPath)
+        "GetSecrets prompt type={} connection=\"{}\" path={}", simPin ? "sim-pin" : "wifi-psk", request.connectionName,
+        std::string(connectionPath)
     );
 
     pendingResult = std::move(result);

@@ -270,7 +270,6 @@
     },
     "network": {
       "available": "Verfügbar",
-      "cellular": "Mobilfunk",
       "connect": "Verbinden",
       "current-connection": "Aktuelle Verbindung",
       "external-ip": "WAN {ip}",

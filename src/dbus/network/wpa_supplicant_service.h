@@ -44,7 +44,6 @@ public:
   bool activateVpnConnection(const VpnConnectionInfo& /*vpn*/) override { return false; }
   bool deactivateVpnConnection(const VpnConnectionInfo& /*vpn*/) override { return false; }
   bool activateCellularConnection(const CellularConnectionInfo& /*cellular*/) override { return false; }
-  bool deactivateCellularConnection(const CellularConnectionInfo& /*cellular*/) override { return false; }
   void setWirelessEnabled(bool enabled, WirelessEnabledCompletion onComplete = {}) override;
   void setCellularEnabled(bool /*enabled*/, WirelessEnabledCompletion onComplete = {}) override {
     if (onComplete) {
@@ -72,7 +71,7 @@ private:
   std::unordered_map<std::string, std::string> m_savedNetworks;
   NetworkState m_state;
   std::vector<AccessPointInfo> m_accessPoints;
-  const std::vector<VpnConnectionInfo> m_vpnConnections; // always empty
+  const std::vector<VpnConnectionInfo> m_vpnConnections;           // always empty
   const std::vector<CellularConnectionInfo> m_cellularConnections; // always empty
   bool m_hasStateSnapshot = false;
   bool m_rebuildPending = false;
