@@ -1,5 +1,5 @@
 project('noctalia', ['c', 'cpp'],
-  version: '5.0.0',
+  version: '5.0.1',
   default_options: [
     'cpp_std=c++23',
     'cpp_extensions=false',
@@ -1150,6 +1150,7 @@ if build_tests
     'config_override_mutation',
     'config_path_resolution',
     'config_schema_roundtrip',
+    'config_wallpaper_precedence',
     'config_widget',
     'context_menu_popup',
     'cpu_freq',
